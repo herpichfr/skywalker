@@ -1,8 +1,9 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
-``By Herpich F. R.``<br />
 ``Version: 0.4``
+
+By Herpich F. R.  
 
 This tool can be used to plan the nights for virtually any observatory on the Planet. The user can make maps for individual objects or lists containing several of them. It is also possible to define time blocks for every object (individual or in a list). The angular distance to the Moon will always be shown at the given initial time for each object (if none is given, the default is 0 UTC).
 
