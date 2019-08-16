@@ -1,6 +1,8 @@
 # skywalker
+
 SkyWalker - Python observation planner tool
 -------------------------------------------
+
 By Herpich F. R.
 Version: 0.4
 
@@ -18,10 +20,10 @@ Requisites
 
 python 2.7 (not tested with python 3)
 
-numpy
-matplotlib
-astropy
-datetime
+numpy  
+matplotlib  
+astropy  
+datetime  
 warnings
 
 This code uses a modified version of the Astroplan code (https://astroplan.readthedocs.io/en/latest/), dubbed here myastroplan. All the modified code is included in this repository. If you use this code in your research, please cite accordingly (see https://github.com/astropy/astroplan for the full reference provided by the authors).
@@ -29,8 +31,9 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Examples
 ++++++++
 
+```bash
 python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --savechart test01
-
+```
 .. image:: figs/test01_2019-08-23_plan.png
 
 python --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test02
