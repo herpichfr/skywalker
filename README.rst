@@ -1,5 +1,3 @@
-# skywalker
-
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
@@ -31,7 +29,9 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Examples
 ++++++++
 
-<code>python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --savechart test01</code>
+```
+python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --savechart test01
+```
 
 .. image:: figs/test01_2019-08-23_plan.png
 
