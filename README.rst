@@ -37,11 +37,15 @@ Examples
 ``python --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test02``
 
 .. image:: figs/test02_2019-08-23_plan.png
-
-``python -f example_file.csv --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test03``
+   
+``python --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --blocktime 3851 --skychart --savechart test03``
 
 .. image:: figs/test03_2019-08-23_plan.png
 
-``python -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --at 3 --skychart --savechart test04``
+``python -f example_file.csv --observatory 'Cerro Tololo' -ns 2019-08-23 --skychart --savechart test04``
 
 .. image:: figs/test04_2019-08-23_plan.png
+
+``python -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --at 3 --skychart --savechart test05``
+
+.. image:: figs/test05_2019-08-23_plan.png
