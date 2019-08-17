@@ -30,22 +30,32 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Examples
 ++++++++
 
+* Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 3 UTC
+
 ``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --savechart test01``
 
 .. image:: figs/test01_2019-08-23_plan.png
 
-``python --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test02``
+* Showing the skychart for the same track
+
+``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test02``
 
 .. image:: figs/test02_2019-08-23_plan.png
    
-``python --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --blocktime 3851 --skychart --savechart test03``
+* Adding an observing block starting at 3 UTC for NGC104 at Cerro Tololo
+
+``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --blocktime 3851 --skychart --savechart test03``
 
 .. image:: figs/test03_2019-08-23_plan.png
 
-``python -f example_file.csv --observatory 'Cerro Tololo' -ns 2019-08-23 --skychart --savechart test04``
+* Showing all tracks of a list of objects for Cerro Tololo
+
+``python skywalker.py -f example_file.csv --observatory 'Cerro Tololo' -ns 2019-08-23 --skychart --savechart test04``
 
 .. image:: figs/test04_2019-08-23_plan.png
 
-``python -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --at 3 --skychart --savechart test05``
+* Showing all tracks of a list of objects for a given observatory provided by the sitefile
+
+``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --savechart test05``
 
 .. image:: figs/test05_2019-08-23_plan.png

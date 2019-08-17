@@ -104,6 +104,8 @@ def print_help():
     --sitefile              [string] a csv file containing all the information
                             about the site. Can be used instead of using --observatory,
                             --lon and height. The columns must be named as NAME,LON,LAT,HEIGHT
+    --minalt                [float] altitude limit of the telescope intended to be used
+                            for the observations
 
     --skychart              Define the track of the target in the sky starting at
                             the time defined by --at
@@ -416,7 +418,6 @@ if '--observatory' in sys.argv:# if site is provided
         for site in EarthLocation.get_site_names(): print(site)
         sys.exit(0)
     elif (sitename not in EarthLocation.get_site_names()) & ('--lat' in sys.argv) & ('--lon' in sys.argv):
-        plotLine = False
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--lat']
         lat = np.array(sys.argv)[index + 1].item()
         if lat.split(':') > 1:
@@ -466,7 +467,11 @@ if '--observatory' in sys.argv:# if site is provided
     utcoffset = 0*u.hour
     xlabel = 'UTC'
     tlabel = 'UTC'
-    plotLine = False
+    if '--minalt' in sys.argv:
+        index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
+        minalt = np.float(np.array(sys.argv)[index + 1].item())
+    else:
+        minalt = 0
 elif '--sitefile' in sys.argv:# if file containing site info is given
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--sitefile']
     sitefilename = np.array(sys.argv)[index + 1].item()
@@ -476,7 +481,11 @@ elif '--sitefile' in sys.argv:# if file containing site info is given
     utcoffset = 0*u.hour
     xlabel = 'UTC'
     tlabel = 'UTC'
-    plotLine = False
+    if '--minalt' in sys.argv:
+        index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
+        minalt = np.float(np.array(sys.argv)[index + 1].item())
+    else:
+        minalt = 0
 else:# the default is the Cerro Tololo Observatory, with some specs used by the S-PLUS-T80S team
     warnings.warn('Observatory not identified. Using default T80S at Cerro Tololo')
     sitename = 'T80-South'
@@ -484,7 +493,7 @@ else:# the default is the Cerro Tololo Observatory, with some specs used by the 
     utcoffset = 0*u.hour
     xlabel = 'UTC'
     tlabel = 'UTC'
-    plotLine = True
+    minalt = 30
 
 night_for_chart = night_starts
 # define the time to calculate the distance to the moon and to start the
@@ -581,7 +590,7 @@ for myObj in myListObj:
                                  np.zeros(len(delta_midnight)),
                                  myaltazs_time_overnight.alt,
                                  (delta_midnight.value >= obj_dec_inhour) & (delta_midnight.value <= (obj_dec_inhour + obj_bltime)),
-                                 color='y')
+                                 color=p[0].get_color())
             except:
                 warnings.warn('wrong time format for blocktime (should be seconds)')
     else:# if single object
@@ -625,13 +634,13 @@ if '--skychart' in sys.argv:
                                                   'label': 'moon: %i%%' % (moon_brightness*100)},
              hours_value=np.arange(inivalue, endvalue, 1))
     circle = plt.Circle((0., 0.), 90, transform=ax3.transData._b,
-                       color="orangered", alpha=0.7, zorder=0)
+                       color="red", alpha=0.7, zorder=0)
     ax3.add_artist(circle)
-    circle = plt.Circle((0., 0.), 55, transform=ax3.transData._b,
+    circle = plt.Circle((0., 0.), 90-minalt, transform=ax3.transData._b,
                        color="white", alpha=1., zorder=0)
     ax3.add_artist(circle)
-    circle = plt.Circle((0., 0.), 55, transform=ax3.transData._b,
-                       color="gray", alpha=1.1 - _moon_brightness, zorder=0)
+    circle = plt.Circle((0., 0.), 90-minalt, transform=ax3.transData._b,
+                       color="black", alpha=1.1 - _moon_brightness, zorder=0)
     ax3.add_artist(circle)
 if isList:
     if '--astrotime' in sys.argv:
@@ -674,8 +683,8 @@ else:
     leg.get_frame().set_edgecolor('white')
 minx = delta_midnight.value[sunaltazs_time_overnight.alt < -0*u.deg].min() - 1
 maxx = delta_midnight.value[sunaltazs_time_overnight.alt < -0*u.deg].max() + 1
-if plotLine:
-    ax1.plot([minx, maxx], [35, 35], '--', c='r')
+if minalt > 1:
+    ax1.plot([minx, maxx], [minalt, minalt], '--', c='r')
 ax1.set_xlim(minx, maxx)
 ax1.set_ylim(0, 90)
 ax1.set_xlabel(xlabel)
