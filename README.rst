@@ -59,3 +59,9 @@ Examples
 ``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --savechart test05``
 
 .. image:: figs/test05_2019-08-23_plan.png
+
+* Including an altitude/airmass limit to the observations
+
+``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savechart test06``
+
+.. image:: figs/test06_2019-08-23_plan.png
