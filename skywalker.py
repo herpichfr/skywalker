@@ -605,7 +605,7 @@ for myObj in myListObj:
                              color='y')
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time, observe_time,
-                     sunaltazs_time_overnight, obj_style={'cmap': 'inferno_r',
+                     sunaltazs_time_overnight, obj_style={'cmap': 'inferno',
                                                           'marker': '*',
                                                           'c': np.arange(inivalue, endvalue, 1),
                                                           'label': myObj[0]}, hours_value=np.arange(inivalue, endvalue, 1))
