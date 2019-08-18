@@ -19,11 +19,11 @@ Requisites
 
 python 2.7 (not tested with python 3)
 
-numpy  
-matplotlib  
-astropy  
-datetime  
-warnings
+``numpy``   
+``matplotlib``   
+``astropy``   
+``datetime``   
+``warnings``
 
 This code uses a modified version of the Astroplan code (https://astroplan.readthedocs.io/en/latest/), dubbed here myastroplan. All the modified code is included in this repository. If you use this code in your research, please cite accordingly (see https://github.com/astropy/astroplan for the full reference provided by the authors).
 
@@ -32,19 +32,19 @@ Examples
 
 * Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 3 UTC
 
-``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --savechart test01``
+``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --savechart test01``
 
 .. image:: figs/test01_2019-08-23_plan.png
 
 * Showing the skychart for the same track
 
-``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --skychart --savechart test02``
+``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --skychart --savechart test02``
 
 .. image:: figs/test02_2019-08-23_plan.png
    
 * Adding an observing block starting at 3 UTC for NGC104 at Cerro Tololo
 
-``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 3 --blocktime 3851 --skychart --savechart test03``
+``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --blocktime 3851 --skychart --savechart test03``
 
 .. image:: figs/test03_2019-08-23_plan.png
 

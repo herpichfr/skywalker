@@ -10,6 +10,8 @@ from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_su
 import sys, os
 import datetime
 from astropy.io import ascii
+import pytz
+from tzwhere import tzwhere
 import warnings
 from myastroplan.plots import plot_sky
 from myastroplan import Observer
@@ -53,7 +55,7 @@ def print_help():
     --at                    [hh:mm:ss] shows moon brigthness and angular distance
                             to object at the specified hour. This value is also used
                             to start the observation block for an especified object
-                            when defined.
+                            when defined. Must be Local Time
     --astrotime             show the total number of astronomical hours of the night
 
     --object                [string] to entry a known object by name. It will look at the
@@ -459,14 +461,23 @@ if '--observatory' in sys.argv:# if site is provided
             sitename = 'LAT%.1f_LON%.1f' % (mylat, mylon)
     elif sitename in EarthLocation.get_site_names():
         mysite = EarthLocation.of_site(sitename)
+    tzwhere = tzwhere.tzwhere()
+    timezone_str = tzwhere.tzNameAt(mysite.lat.value, mysite.lon.value)
+    timezone = pytz.timezone(timezone_str)
     dt = datetime.datetime(int(night_starts.split('-')[0]),
                            int(night_starts.split('-')[1]),
                            int(night_starts.split('-')[2]),
                            0, 0, 0, 0)
     # only UTC is implemented
-    utcoffset = 0*u.hour
-    xlabel = 'UTC'
-    tlabel = 'UTC'
+    utcoffset = (timezone.utcoffset(dt).seconds/3600 - 24)*u.hour
+    if (utcoffset.value < 0) & (utcoffset.value >= -12):
+        xlabel = 'Local Time (UTC %i)' % utcoffset.value
+    else:
+        xlabel = 'Local Time (UTC + %i)' % (utcoffset.value + 24)
+    tlabel = 'LT'
+    #utcoffset = 0*u.hour
+    #xlabel = 'UTC'
+    #tlabel = 'UTC'
     if '--minalt' in sys.argv:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
         minalt = np.float(np.array(sys.argv)[index + 1].item())
@@ -478,22 +489,50 @@ elif '--sitefile' in sys.argv:# if file containing site info is given
     sitefile = ascii.read(sitefilename)
     sitename = sitefile['NAME'][0]
     mysite = EarthLocation(lat=sitefile['LAT'][0], lon=sitefile['LON'][0], height=sitefile['HEIGHT'][0])
-    utcoffset = 0*u.hour
-    xlabel = 'UTC'
-    tlabel = 'UTC'
+    #utcoffset = 0*u.hour
+    #xlabel = 'UTC'
+    #tlabel = 'UTC'
     if '--minalt' in sys.argv:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
         minalt = np.float(np.array(sys.argv)[index + 1].item())
     else:
         minalt = 0
+    tzwhere = tzwhere.tzwhere()
+    timezone_str = tzwhere.tzNameAt(mysite.lat.value, mysite.lon.value)
+    timezone = pytz.timezone(timezone_str)
+    dt = datetime.datetime(int(night_starts.split('-')[0]),
+                           int(night_starts.split('-')[1]),
+                           int(night_starts.split('-')[2]),
+                           0, 0, 0, 0)
+    # only Local Time is implemented
+    utcoffset = (timezone.utcoffset(dt).seconds/3600 - 24)*u.hour
+    if (utcoffset.value < 0) & (utcoffset.value >= -12):
+        xlabel = 'Local Time (UTC %i)' % utcoffset.value
+    else:
+        xlabel = 'Local Time (UTC + %i)' % (utcoffset.value + 24)
+    tlabel = 'LT'
 else:# the default is the Cerro Tololo Observatory, with some specs used by the S-PLUS-T80S team
     warnings.warn('Observatory not identified. Using default T80S at Cerro Tololo')
     sitename = 'T80-South'
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8*u.deg, height=2200*u.m)
-    utcoffset = 0*u.hour
-    xlabel = 'UTC'
-    tlabel = 'UTC'
+    #utcoffset = 0*u.hour
+    #xlabel = 'UTC'
+    #tlabel = 'UTC'
     minalt = 30
+    tzwhere = tzwhere.tzwhere()
+    timezone_str = tzwhere.tzNameAt(mysite.lat.value, mysite.lon.value)
+    timezone = pytz.timezone(timezone_str)
+    dt = datetime.datetime(int(night_starts.split('-')[0]),
+                           int(night_starts.split('-')[1]),
+                           int(night_starts.split('-')[2]),
+                           0, 0, 0, 0)
+    # only Local Time is implemented
+    utcoffset = (timezone.utcoffset(dt).seconds/3600 - 24)*u.hour
+    if (utcoffset.value < 0) & (utcoffset.value >= -12):
+        xlabel = 'Local Time (UTC %i)' % utcoffset.value
+    else:
+        xlabel = 'Local Time (UTC + %i)' % (utcoffset.value + 24)
+    tlabel = 'LT'
 
 night_for_chart = night_starts
 # define the time to calculate the distance to the moon and to start the
@@ -501,12 +540,14 @@ night_for_chart = night_starts
 if '--at' in sys.argv:
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--at']
     inithour = np.array(sys.argv)[index + 1].item()
+    if inithour >= '24':
+        raise IOError('wrong initial hour %s' % inithour)
     inithour, night_starts = standard_hour(inithour, night_starts, night_ends)
 else:
     inithour = '23:59:59'
 
 time = Time('%s %s' % (night_starts, inithour)) - utcoffset
-titlenight = time.value[:-4] + tlabel
+titlenight = 'Conditions at ' + (time + utcoffset).value[:-4] + ' LT for ' + sitename
 midnight = Time('%s 00:00:00' % night_ends) - utcoffset
 delta_midnight = np.linspace(-12, 12, 500)*u.hour
 frame_tonight = AltAz(obstime=midnight+delta_midnight,
@@ -526,8 +567,8 @@ moon_time_overnight = get_moon(times_time_overnight)
 moonaltazs_time_overnight = moon_time_overnight.transform_to(frame_time_overnight)
 
 # moon phase
-sun_pos = get_sun(time)
-moon_pos = get_moon(time)
+sun_pos = get_sun(time+utcoffset)
+moon_pos = get_moon(time+utcoffset)
 elongation = sun_pos.separation(moon_pos)
 moon_phase = np.arctan2(sun_pos.distance*np.sin(elongation),
                         moon_pos.distance - sun_pos.distance*np.cos(elongation))
@@ -568,7 +609,8 @@ for myObj in myListObj:
 
     inivalue = obj_dec_inhour
     endvalue = delta_midnight[sunaltazs_time_overnight.alt < -18*u.deg].max().value
-    observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
+    #observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
+    observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour
 
     myaltaz = mycoords.transform_to(AltAz(obstime=objtime, location=mysite))
 
@@ -578,6 +620,7 @@ for myObj in myListObj:
 
     if isList:# if list
         p = ax1.plot(delta_midnight, myaltazs_time_overnight.alt, label=myObj[0])
+        titlenight = 'Conditions for night starting at ' + (time + utcoffset).value[:10] + ' LT for ' + sitename
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time, observe_time,
                      sunaltazs_time_overnight, obj_style={'color': p[0].get_color(),
@@ -604,8 +647,8 @@ for myObj in myListObj:
                              (delta_midnight.value >= dec_inhour) & (delta_midnight.value <= (dec_inhour + blocktime / 3600.)),
                              color='y')
         if '--skychart' in sys.argv:
-            skychart(ax3, mysite, mycoords, time, observe_time,
-                     sunaltazs_time_overnight, obj_style={'cmap': 'inferno',
+            skychart(ax3, mysite, mycoords, time+utcoffset, observe_time,
+                     sunaltazs_time_overnight, obj_style={'cmap': 'viridis',
                                                           'marker': '*',
                                                           'c': np.arange(inivalue, endvalue, 1),
                                                           'label': myObj[0]}, hours_value=np.arange(inivalue, endvalue, 1))
@@ -692,7 +735,7 @@ xt = ax1.get_xticks()
 xt[xt < 0] += 24
 ax1.set_xticklabels(['%i' % n for n in xt])
 ax1.set_ylabel('Altitude [deg]')
-ax1.set_title('Conditions at %s for %s' % (titlenight, sitename), fontsize=11)
+ax1.set_title(titlenight, fontsize=11)
 
 ax2 = ax1.twinx()
 altitude = ax1.get_yticks()*u.deg
