@@ -540,8 +540,8 @@ night_for_chart = night_starts
 if '--at' in sys.argv:
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--at']
     inithour = np.array(sys.argv)[index + 1].item()
-    if inithour >= '24':
-        raise IOError('wrong initial hour %s' % inithour)
+    #if inithour >= '24':
+    #    raise IOError('wrong initial hour %s' % inithour)
     inithour, night_starts = standard_hour(inithour, night_starts, night_ends)
 else:
     inithour = '23:59:59'

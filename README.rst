@@ -17,7 +17,7 @@ python skywalker.py --help
 Requisites
 ++++++++++
 
-python 2.7 (not tested with python 3)
+``python 2.7`` (not tested with ``python 3``)
 
 ``numpy``   
 ``matplotlib``   
