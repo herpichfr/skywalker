@@ -16,8 +16,8 @@ import warnings
 from myastroplan.plots import plot_sky
 from myastroplan import Observer
 
-lastversion = '0.4'
-moddate = '2019-08-16'
+lastversion = '0.4.1'
+moddate = '2019-08-21'
 
 initext = """
     ===================================================================
@@ -540,15 +540,13 @@ night_for_chart = night_starts
 if '--at' in sys.argv:
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--at']
     inithour = np.array(sys.argv)[index + 1].item()
-    #if inithour >= '24':
-    #    raise IOError('wrong initial hour %s' % inithour)
     inithour, night_starts = standard_hour(inithour, night_starts, night_ends)
 else:
     inithour = '23:59:59'
 
-time = Time('%s %s' % (night_starts, inithour)) - utcoffset
-titlenight = 'Conditions at ' + (time + utcoffset).value[:-4] + ' LT for ' + sitename
-midnight = Time('%s 00:00:00' % night_ends) - utcoffset
+time = Time('%s %s' % (night_starts, inithour), scale='utc') - utcoffset
+titlenight = 'Conditions at ' + (time).value[:-4] + ' LT for ' + sitename
+midnight = Time('%s 00:00:00' % night_ends, scale='utc') - utcoffset
 delta_midnight = np.linspace(-12, 12, 500)*u.hour
 frame_tonight = AltAz(obstime=midnight+delta_midnight,
                           location=mysite)
@@ -567,8 +565,8 @@ moon_time_overnight = get_moon(times_time_overnight)
 moonaltazs_time_overnight = moon_time_overnight.transform_to(frame_time_overnight)
 
 # moon phase
-sun_pos = get_sun(time+utcoffset)
-moon_pos = get_moon(time+utcoffset)
+sun_pos = get_sun(time)
+moon_pos = get_moon(time)
 elongation = sun_pos.separation(moon_pos)
 moon_phase = np.arctan2(sun_pos.distance*np.sin(elongation),
                         moon_pos.distance - sun_pos.distance*np.cos(elongation))
@@ -600,7 +598,7 @@ for myObj in myListObj:
         objhour, night_starts = standard_hour(myObj[3], night_starts, night_ends)
     else:
         objhour = inithour
-    objtime = Time('%s %s' % (night_starts, objhour)) - utcoffset
+    objtime = Time('%s %s' % (night_starts, objhour), scale='utc') - utcoffset
     obj_dec_inhour =  np.float(objhour.split(':')[0])
     obj_dec_inhour += np.float(objhour.split(':')[1]) / 60.
     obj_dec_inhour += np.float(objhour.split(':')[2]) / 3600.
@@ -609,8 +607,7 @@ for myObj in myListObj:
 
     inivalue = obj_dec_inhour
     endvalue = delta_midnight[sunaltazs_time_overnight.alt < -18*u.deg].max().value
-    #observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
-    observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour
+    observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour - inivalue*u.hour
 
     myaltaz = mycoords.transform_to(AltAz(obstime=objtime, location=mysite))
 
@@ -647,7 +644,7 @@ for myObj in myListObj:
                              (delta_midnight.value >= dec_inhour) & (delta_midnight.value <= (dec_inhour + blocktime / 3600.)),
                              color='y')
         if '--skychart' in sys.argv:
-            skychart(ax3, mysite, mycoords, time+utcoffset, observe_time,
+            skychart(ax3, mysite, mycoords, time, observe_time,
                      sunaltazs_time_overnight, obj_style={'cmap': 'viridis',
                                                           'marker': '*',
                                                           'c': np.arange(inivalue, endvalue, 1),

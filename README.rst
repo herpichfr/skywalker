@@ -1,7 +1,7 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
-``Version: 0.4``
+``Version: 0.4.1``
 
 By Herpich F. R.  
 
@@ -12,7 +12,7 @@ Usage
 
 - to get the full set of options available with the full description:
 
-python skywalker.py --help
+``python skywalker.py --help``
 
 Requisites
 ++++++++++
