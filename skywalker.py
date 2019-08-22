@@ -16,8 +16,8 @@ import warnings
 from myastroplan.plots import plot_sky
 from myastroplan import Observer
 
-lastversion = '0.4.1'
-moddate = '2019-08-21'
+lastversion = '0.4.2'
+moddate = '2019-08-22'
 
 initext = """
     ===================================================================
@@ -177,7 +177,6 @@ if ('--nightstarts' in sys.argv) | ('-ns' in sys.argv):
     else:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '-ns']
     night_starts = np.array(sys.argv)[index + 1].item()
-    night_beg = night_starts
     if len(night_starts.split('-')) < 3:
         raise IOError('wrong format for date')
     else:
@@ -198,6 +197,7 @@ else:
     night_starts = ns.strftime("%Y-%m-%d")
 ne = ns + datetime.timedelta(days=1)
 night_ends = ne.strftime("%Y-%m-%d")
+night_beg = night_starts
 
 # build the necessary requisites to draw the observation block
 if '--blocktime' in sys.argv:
@@ -545,7 +545,6 @@ else:
     inithour = '23:59:59'
 
 time = Time('%s %s' % (night_starts, inithour), scale='utc') - utcoffset
-titlenight = 'Conditions at ' + (time).value[:-4] + ' LT for ' + sitename
 midnight = Time('%s 00:00:00' % night_ends, scale='utc') - utcoffset
 delta_midnight = np.linspace(-12, 12, 500)*u.hour
 frame_tonight = AltAz(obstime=midnight+delta_midnight,
@@ -585,6 +584,18 @@ if '--skychart' in sys.argv:
     ax3 = fig.add_subplot(1,2,2, projection='polar')
 else:
     fig, ax1 = plt.subplots()
+#    ax1 = host_subplot(111, axes_class=AA.Axes)
+#    plt.subplots_adjust(bottom=0.25)
+#
+#ax2 = ax1.twinx()
+#ax4 = ax1.twinx()
+#offset = -60
+#new_fixed_axis = ax4.get_grid_helper().new_fixed_axis
+#ax4.axis["bottom"] = new_fixed_axis(loc="bottom",
+#                                    axes=ax4,
+#                                    offset=(0, offset))
+#
+#ax4.axis["bottom"].toggle(all=True)
 
 # start building the figure
 for myObj in myListObj:
@@ -617,7 +628,6 @@ for myObj in myListObj:
 
     if isList:# if list
         p = ax1.plot(delta_midnight, myaltazs_time_overnight.alt, label=myObj[0])
-        titlenight = 'Conditions for night starting at ' + (time + utcoffset).value[:10] + ' LT for ' + sitename
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time, observe_time,
                      sunaltazs_time_overnight, obj_style={'color': p[0].get_color(),
@@ -732,6 +742,7 @@ xt = ax1.get_xticks()
 xt[xt < 0] += 24
 ax1.set_xticklabels(['%i' % n for n in xt])
 ax1.set_ylabel('Altitude [deg]')
+titlenight = 'Night starting at ' + night_beg + ' at ' + sitename
 ax1.set_title(titlenight, fontsize=11)
 
 ax2 = ax1.twinx()
@@ -746,6 +757,7 @@ for airval in airmass:
         myticks.append('%.2f' % airval)
 ax2.set_yticklabels(myticks)
 ax2.set_ylim(0, 90)
+
 if not isList:
     plt.colorbar(sc, pad=.1).set_label('Azimuth [deg]')
 plt.tight_layout()

@@ -1,7 +1,7 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
-``Version: 0.4.1``
+``Version: 0.4.2``
 
 By Herpich F. R.  
 
