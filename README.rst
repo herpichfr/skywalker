@@ -5,7 +5,7 @@ SkyWalker - Python observation planner tool
 
 By Herpich F. R.  
 
-This tool can be used to plan the nights for virtually any observatory on the Planet. The user can make maps for individual objects or lists containing several of them. It is also possible to define time blocks for every object (individual or in a list). The angular distance to the Moon will always be shown at the given initial time for each object (if none is given, the default is 0 UTC).
+This tool can be used to plan the nights for virtually any observatory on the Planet. The user can make maps for individual objects or lists containing several of them. It is also possible to define time blocks for every object (individual or in a list). The angular distance to the Moon will always be shown at the given initial time for each object (if none is given, the default is 0 LT).
 
 Usage
 +++++
@@ -30,7 +30,7 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Examples
 ++++++++
 
-* Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 3 UTC
+* Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 0:30 LT
 
 ``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --savechart test01``
 
@@ -42,7 +42,7 @@ Examples
 
 .. image:: figs/test02_2019-08-23_plan.png
    
-* Adding an observing block starting at 3 UTC for NGC104 at Cerro Tololo
+* Adding an observing block starting at 0:30 LT for NGC104 at Cerro Tololo
 
 ``python skywalker.py --object NGC104 --observatory 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --blocktime 3851 --skychart --savechart test03``
 
