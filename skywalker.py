@@ -15,9 +15,11 @@ from tzwhere import tzwhere
 import warnings
 from myastroplan.plots import plot_sky
 from myastroplan import Observer
+#from astropy.utils import iers
+#iers.conf.auto_download = False
 
-lastversion = '0.4.2'
-moddate = '2019-08-22'
+lastversion = '0.5'
+moddate = '2020-03-12'
 
 initext = """
     ===================================================================
@@ -177,6 +179,7 @@ if ('--nightstarts' in sys.argv) | ('-ns' in sys.argv):
     else:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '-ns']
     night_starts = np.array(sys.argv)[index + 1].item()
+    night_beg = night_starts
     if len(night_starts.split('-')) < 3:
         raise IOError('wrong format for date')
     else:
@@ -197,7 +200,6 @@ else:
     night_starts = ns.strftime("%Y-%m-%d")
 ne = ns + datetime.timedelta(days=1)
 night_ends = ne.strftime("%Y-%m-%d")
-night_beg = night_starts
 
 # build the necessary requisites to draw the observation block
 if '--blocktime' in sys.argv:
@@ -544,8 +546,9 @@ if '--at' in sys.argv:
 else:
     inithour = '23:59:59'
 
-time = Time('%s %s' % (night_starts, inithour), scale='utc') - utcoffset
-midnight = Time('%s 00:00:00' % night_ends, scale='utc') - utcoffset
+time = Time('%s %s' % (night_starts, inithour)) - utcoffset
+titlenight = 'Conditions at ' + (time + utcoffset).value[:-4] + ' LT for ' + sitename
+midnight = Time('%s 00:00:00' % night_ends) - utcoffset
 delta_midnight = np.linspace(-12, 12, 500)*u.hour
 frame_tonight = AltAz(obstime=midnight+delta_midnight,
                           location=mysite)
@@ -564,8 +567,8 @@ moon_time_overnight = get_moon(times_time_overnight)
 moonaltazs_time_overnight = moon_time_overnight.transform_to(frame_time_overnight)
 
 # moon phase
-sun_pos = get_sun(time)
-moon_pos = get_moon(time)
+sun_pos = get_sun(time+utcoffset)
+moon_pos = get_moon(time+utcoffset)
 elongation = sun_pos.separation(moon_pos)
 moon_phase = np.arctan2(sun_pos.distance*np.sin(elongation),
                         moon_pos.distance - sun_pos.distance*np.cos(elongation))
@@ -584,18 +587,6 @@ if '--skychart' in sys.argv:
     ax3 = fig.add_subplot(1,2,2, projection='polar')
 else:
     fig, ax1 = plt.subplots()
-#    ax1 = host_subplot(111, axes_class=AA.Axes)
-#    plt.subplots_adjust(bottom=0.25)
-#
-#ax2 = ax1.twinx()
-#ax4 = ax1.twinx()
-#offset = -60
-#new_fixed_axis = ax4.get_grid_helper().new_fixed_axis
-#ax4.axis["bottom"] = new_fixed_axis(loc="bottom",
-#                                    axes=ax4,
-#                                    offset=(0, offset))
-#
-#ax4.axis["bottom"].toggle(all=True)
 
 # start building the figure
 for myObj in myListObj:
@@ -609,7 +600,7 @@ for myObj in myListObj:
         objhour, night_starts = standard_hour(myObj[3], night_starts, night_ends)
     else:
         objhour = inithour
-    objtime = Time('%s %s' % (night_starts, objhour), scale='utc') - utcoffset
+    objtime = Time('%s %s' % (night_starts, objhour)) - utcoffset
     obj_dec_inhour =  np.float(objhour.split(':')[0])
     obj_dec_inhour += np.float(objhour.split(':')[1]) / 60.
     obj_dec_inhour += np.float(objhour.split(':')[2]) / 3600.
@@ -618,7 +609,8 @@ for myObj in myListObj:
 
     inivalue = obj_dec_inhour
     endvalue = delta_midnight[sunaltazs_time_overnight.alt < -18*u.deg].max().value
-    observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour - inivalue*u.hour
+    #observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
+    observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour
 
     myaltaz = mycoords.transform_to(AltAz(obstime=objtime, location=mysite))
 
@@ -628,6 +620,7 @@ for myObj in myListObj:
 
     if isList:# if list
         p = ax1.plot(delta_midnight, myaltazs_time_overnight.alt, label=myObj[0])
+        titlenight = 'Conditions for night starting at ' + (time + utcoffset).value[:10] + ' LT for ' + sitename
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time, observe_time,
                      sunaltazs_time_overnight, obj_style={'color': p[0].get_color(),
@@ -654,7 +647,7 @@ for myObj in myListObj:
                              (delta_midnight.value >= dec_inhour) & (delta_midnight.value <= (dec_inhour + blocktime / 3600.)),
                              color='y')
         if '--skychart' in sys.argv:
-            skychart(ax3, mysite, mycoords, time, observe_time,
+            skychart(ax3, mysite, mycoords, time+utcoffset, observe_time,
                      sunaltazs_time_overnight, obj_style={'cmap': 'viridis',
                                                           'marker': '*',
                                                           'c': np.arange(inivalue, endvalue, 1),
@@ -726,7 +719,7 @@ else:
             fancybox=True, scatterpoints=1)
     else:
         if '--skychart' in sys.argv:
-            leg = plt.legend(loc='center left', scatterpoints=1, bbox_to_anchor=(1., 0.), fancybox=True)
+            leg = plt.legend(loc='lower left', scatterpoints=1, bbox_to_anchor=(1., 0.), fancybox=True)
         else:
             leg = plt.legend(loc='lower left', fancybox=True, scatterpoints=1)
     leg.get_frame().set_alpha(0.9)
@@ -742,7 +735,6 @@ xt = ax1.get_xticks()
 xt[xt < 0] += 24
 ax1.set_xticklabels(['%i' % n for n in xt])
 ax1.set_ylabel('Altitude [deg]')
-titlenight = 'Night starting at ' + night_beg + ' at ' + sitename
 ax1.set_title(titlenight, fontsize=11)
 
 ax2 = ax1.twinx()
@@ -757,7 +749,6 @@ for airval in airmass:
         myticks.append('%.2f' % airval)
 ax2.set_yticklabels(myticks)
 ax2.set_ylim(0, 90)
-
 if not isList:
     plt.colorbar(sc, pad=.1).set_label('Azimuth [deg]')
 plt.tight_layout()
