@@ -1,7 +1,7 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
-``Version: 0.4.2``
+``Version: 1.0.0``
 
 By Herpich F. R.  
 
@@ -17,7 +17,7 @@ Usage
 Requisites
 ++++++++++
 
-``python 2.7`` (not tested with ``python 3``)
+``python 3``
 
 ``numpy``   
 ``matplotlib``   
@@ -65,3 +65,8 @@ Examples
 ``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savechart test06``
 
 .. image:: figs/test06_2019-08-23_plan.png
+
+Last modifications
+++++++++
+
+* 2020-03-12: Upgrading for Python 3 - Files modificated: skywalker.py and myastroplan/sky.py
