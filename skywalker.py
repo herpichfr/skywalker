@@ -1,22 +1,23 @@
 #!/bin/python
 
+import os
+import sys
+from myastroplan import Observer
+from myastroplan.plots import plot_sky
+import warnings
+from tzwhere import tzwhere
+import pytz
+from astropy.io import ascii
+import datetime
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_sun
+from astropy.time import Time
+import astropy.units as u
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.visualization import astropy_mpl_style
 plt.style.use(astropy_mpl_style)
-import astropy.units as u
-from astropy.time import Time
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_moon, get_sun
-import sys, os
-import datetime
-from astropy.io import ascii
-import pytz
-from tzwhere import tzwhere
-import warnings
-from myastroplan.plots import plot_sky
-from myastroplan import Observer
-#from astropy.utils import iers
-#iers.conf.auto_download = False
+# from astropy.utils import iers
+# iers.conf.auto_download = False
 
 lastversion = '0.5'
 moddate = '2020-03-12'
@@ -30,6 +31,7 @@ initext = """
     ===================================================================
     """ % (lastversion, moddate)
 print(initext)
+
 
 def print_help():
 
@@ -131,11 +133,18 @@ def skychart(ax, mysite, mycoords, time, observe_time, sunaltazs_time_overnight,
     draws the map of the sky for the night
     """
 
-    observer = Observer(longitude=mysite.lon, latitude=mysite.lat, elevation=mysite.height)
+    observer = Observer(longitude=mysite.lon,
+                        latitude=mysite.lat, elevation=mysite.height)
 
-    plot_sky(mycoords, observer, observe_time, ax=ax, style_kwargs=obj_style, hours_value=hours_value)
+    plot_sky(mycoords,
+             observer,
+             observe_time,
+             ax=ax,
+             style_kwargs=obj_style,
+             hours_value=hours_value)
 
     return ax
+
 
 def standard_hour(inithour, night_starts, night_ends):
     """
@@ -164,12 +173,14 @@ def standard_hour(inithour, night_starts, night_ends):
 
 ####################################
 
+
 if len(sys.argv) < 2:
     print_help()
 elif ('--help' in sys.argv) | ('-h' in sys.argv):
     print_help()
 elif (len(sys.argv) == 2) & ('--observatory' in sys.argv):
-    for site in EarthLocation.get_site_names(): print(site)
+    for site in EarthLocation.get_site_names():
+        print(site)
     sys.exit(0)
 
 # define the starting night
@@ -210,7 +221,8 @@ if '--blocktime' in sys.argv:
             blocktime = np.float(_blocktime)
             bl_time = True
         except:
-            warnings.warn('WARNING - wrong time format for blocktime (should be seconds)')
+            warnings.warn(
+                'WARNING - wrong time format for blocktime (should be seconds)')
             bl_time = False
     else:
         warnings.warn('WARNING - initial time for block not defined. Skipping')
@@ -221,7 +233,7 @@ else:
 # deal with the input list
 if ('-f' in sys.argv) | ('--file' in sys.argv):
     isList = True
-    isKnown=False
+    isKnown = False
     # check if it is all ok with the list
     if ('-f' in sys.argv) & ('--file' in sys.argv):
         print_help()
@@ -234,7 +246,8 @@ if ('-f' in sys.argv) | ('--file' in sys.argv):
     mytablename = np.array(sys.argv)[index + 1].item()
     f = ascii.read(mytablename)
     if len(f.keys()) < 2:
-        raise IOError('wrong format for list. Needs at least two columns comma or space separated')
+        raise IOError(
+            'wrong format for list. Needs at least two columns comma or space separated')
     elif len(f.keys()) == 2:
         noname = True
         racol = f[f.keys()[0]]
@@ -270,13 +283,15 @@ if ('-f' in sys.argv) | ('--file' in sys.argv):
     # prepare to plot a list of specific objects (PIDs) inside a bigger list
     if '--pid' in sys.argv:
         if 'PID' not in f.keys():
-            warnings.warn('no PID column found. Proceeding for all objects within the file')
+            warnings.warn(
+                'no PID column found. Proceeding for all objects within the file')
             maskpid = np.full(racol.size, True)
         else:
             index = np.arange(len(sys.argv))[np.array(sys.argv) == '--pid']
             pid = np.array(sys.argv)[index + 1].item()
             if '--todo' in sys.argv:
-                maskpid = (f['PID'] == pid) & ((f['STATUS'] == 0) | (f['STATUS'] == 3))
+                maskpid = (f['PID'] == pid) & (
+                    (f['STATUS'] == 0) | (f['STATUS'] == 3))
             else:
                 maskpid = f['PID'] == pid
             print('INFO - calculating for', pid)
@@ -290,16 +305,19 @@ if ('-f' in sys.argv) | ('--file' in sys.argv):
             if '--at' in sys.argv:
                 index = np.arange(len(sys.argv))[np.array(sys.argv) == '--at']
                 inithour = np.array(sys.argv)[index + 1].item()
-                index = np.arange(len(sys.argv))[np.array(sys.argv) == '--blocktime']
+                index = np.arange(len(sys.argv))[
+                    np.array(sys.argv) == '--blocktime']
                 _blocktime = np.array(sys.argv)[index + 1].item()
                 try:
                     blocktime = np.float(_blocktime)
                     bl_time = True
                 except:
-                    warnings.warn('WARNING - wrong time format for blocktime (should be seconds)')
+                    warnings.warn(
+                        'WARNING - wrong time format for blocktime (should be seconds)')
                     bl_time = False
             else:
-                warnings.warn('WARNING - initial time for block not defined. Skipping')
+                warnings.warn(
+                    'WARNING - initial time for block not defined. Skipping')
                 bl_time = False
     else:
         maskpid = np.full(racol.size, True)
@@ -315,7 +333,8 @@ if ('-f' in sys.argv) | ('--file' in sys.argv):
             raunit = u.hourangle
         else:
             raunit = u.deg
-        objcoords = SkyCoord(racol[maskpid][j], deccol[maskpid][j], unit=(raunit, u.deg))
+        objcoords = SkyCoord(
+            racol[maskpid][j], deccol[maskpid][j], unit=(raunit, u.deg))
         myListObj[j].append(objcoords.ra.value)
         myListObj[j].append(objcoords.dec.value)
         if blinit:
@@ -333,10 +352,11 @@ if ('-f' in sys.argv) | ('--file' in sys.argv):
             myListObj[j].append(blocktime)
         else:
             pass
-elif '--names' in sys.argv:# if list is not the given, but using sequence of names
-    warnings.warn('using names, you should provide the names and positions separated by coma')
+elif '--names' in sys.argv:  # if list is not the given, but using sequence of names
+    warnings.warn(
+        'using names, you should provide the names and positions separated by coma')
     isList = True
-    isKnown=False
+    isKnown = False
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--names']
     myobjects = np.array(sys.argv)[index + 1].item().split(',')
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--ra']
@@ -355,15 +375,15 @@ elif '--names' in sys.argv:# if list is not the given, but using sequence of nam
         myListObj[j].append(objcoords.ra.value)
         myListObj[j].append(objcoords.dec.value)
     blinit = False
-elif '--object' in sys.argv:# if single object is provided
+elif '--object' in sys.argv:  # if single object is provided
     isKnown = True
     isList = False
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--object']
     objname = np.array(sys.argv)[index + 1].item()
     myListObj = [[objname]]
     blinit = False
-else: # otherwise it is mandatory entering ra and dec
-    isKnown=False
+else:  # otherwise it is mandatory entering ra and dec
+    isKnown = False
     isList = False
     if (('--ra' not in sys.argv) | ('--dec' not in sys.argv)) & ('--coords' not in sys.argv):
         print_help()
@@ -373,17 +393,25 @@ else: # otherwise it is mandatory entering ra and dec
         objname = 'obj01'
         if '--coords' in sys.argv:
             if len(np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(',')) > 1:
-                objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(',')[0]
-                objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(',')[1]
+                objra = np.array(sys.argv)[indexes[np.array(
+                    sys.argv) == '--coords'] + 1].item().split(',')[0]
+                objdec = np.array(sys.argv)[indexes[np.array(
+                    sys.argv) == '--coords'] + 1].item().split(',')[1]
             elif len(np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(' ')) > 1:
-                objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(' ')[0]
-                objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item().split(' ')[1]
+                objra = np.array(sys.argv)[indexes[np.array(
+                    sys.argv) == '--coords'] + 1].item().split(' ')[0]
+                objdec = np.array(sys.argv)[indexes[np.array(
+                    sys.argv) == '--coords'] + 1].item().split(' ')[1]
             else:
-                objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item()
-                objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 2].item()
+                objra = np.array(sys.argv)[
+                    indexes[np.array(sys.argv) == '--coords'] + 1].item()
+                objdec = np.array(sys.argv)[
+                    indexes[np.array(sys.argv) == '--coords'] + 2].item()
         else:
-            objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--ra'] + 1].item()
-            objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--dec'] + 1].item()
+            objra = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--ra'] + 1].item()
+            objdec = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--dec'] + 1].item()
         if len(objra.split(':')) > 1:
             raunit = u.hourangle
         else:
@@ -391,13 +419,18 @@ else: # otherwise it is mandatory entering ra and dec
         objcoords = SkyCoord(objra, objdec, unit=(raunit, u.deg))
     else:
         indexes = np.arange(len(sys.argv))
-        objname = np.array(sys.argv)[indexes[np.array(sys.argv) == '--name'] + 1].item()
+        objname = np.array(sys.argv)[
+            indexes[np.array(sys.argv) == '--name'] + 1].item()
         if '--coords' in sys.argv:
-            objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 1].item()
-            objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--coords'] + 2].item()
+            objra = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--coords'] + 1].item()
+            objdec = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--coords'] + 2].item()
         else:
-            objra = np.array(sys.argv)[indexes[np.array(sys.argv) == '--ra'] + 1].item()
-            objdec = np.array(sys.argv)[indexes[np.array(sys.argv) == '--dec'] + 1].item()
+            objra = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--ra'] + 1].item()
+            objdec = np.array(sys.argv)[
+                indexes[np.array(sys.argv) == '--dec'] + 1].item()
         if len(objra.split(':')) > 1:
             raunit = u.hourangle
         else:
@@ -407,19 +440,21 @@ else: # otherwise it is mandatory entering ra and dec
     blinit = False
 
 # check for site
-if '--observatory' in sys.argv:# if site is provided
+if '--observatory' in sys.argv:  # if site is provided
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--observatory']
     try:
         sitename = np.array(sys.argv)[index + 1].item()
     except:
         print('please choose an observatory among the available at the')
         print('following list. Otherwise, provide positional data for location')
-        for site in EarthLocation.get_site_names(): print(site)
+        for site in EarthLocation.get_site_names():
+            print(site)
         sys.exit(0)
     if (sitename not in EarthLocation.get_site_names()) & (('--lat' not in sys.argv) & ('--lon' not in sys.argv)):
         print('please choose an observatory among the available at the')
         print('following list. Otherwise, provide positional data for location')
-        for site in EarthLocation.get_site_names(): print(site)
+        for site in EarthLocation.get_site_names():
+            print(site)
         sys.exit(0)
     elif (sitename not in EarthLocation.get_site_names()) & ('--lat' in sys.argv) & ('--lon' in sys.argv):
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--lat']
@@ -458,7 +493,8 @@ if '--observatory' in sys.argv:# if site is provided
         else:
             warnings.warn('height not provided. Using default 1000 m')
             height = 1000.
-        mysite = EarthLocation(lat=mylat*u.deg, lon=mylon*u.deg, height=height*u.m)
+        mysite = EarthLocation(
+            lat=mylat*u.deg, lon=mylon*u.deg, height=height*u.m)
         if sitename.split('-')[0] == '':
             sitename = 'LAT%.1f_LON%.1f' % (mylat, mylon)
     elif sitename in EarthLocation.get_site_names():
@@ -477,23 +513,24 @@ if '--observatory' in sys.argv:# if site is provided
     else:
         xlabel = 'Local Time (UTC + %i)' % (utcoffset.value + 24)
     tlabel = 'LT'
-    #utcoffset = 0*u.hour
-    #xlabel = 'UTC'
-    #tlabel = 'UTC'
+    # utcoffset = 0*u.hour
+    # xlabel = 'UTC'
+    # tlabel = 'UTC'
     if '--minalt' in sys.argv:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
         minalt = np.float(np.array(sys.argv)[index + 1].item())
     else:
         minalt = 0
-elif '--sitefile' in sys.argv:# if file containing site info is given
+elif '--sitefile' in sys.argv:  # if file containing site info is given
     index = np.arange(len(sys.argv))[np.array(sys.argv) == '--sitefile']
     sitefilename = np.array(sys.argv)[index + 1].item()
     sitefile = ascii.read(sitefilename)
     sitename = sitefile['NAME'][0]
-    mysite = EarthLocation(lat=sitefile['LAT'][0], lon=sitefile['LON'][0], height=sitefile['HEIGHT'][0])
-    #utcoffset = 0*u.hour
-    #xlabel = 'UTC'
-    #tlabel = 'UTC'
+    mysite = EarthLocation(
+        lat=sitefile['LAT'][0], lon=sitefile['LON'][0], height=sitefile['HEIGHT'][0])
+    # utcoffset = 0*u.hour
+    # xlabel = 'UTC'
+    # tlabel = 'UTC'
     if '--minalt' in sys.argv:
         index = np.arange(len(sys.argv))[np.array(sys.argv) == '--minalt']
         minalt = np.float(np.array(sys.argv)[index + 1].item())
@@ -513,13 +550,14 @@ elif '--sitefile' in sys.argv:# if file containing site info is given
     else:
         xlabel = 'Local Time (UTC + %i)' % (utcoffset.value + 24)
     tlabel = 'LT'
-else:# the default is the Cerro Tololo Observatory, with some specs used by the S-PLUS-T80S team
-    warnings.warn('Observatory not identified. Using default T80S at Cerro Tololo')
+else:  # the default is the Cerro Tololo Observatory, with some specs used by the S-PLUS-T80S team
+    warnings.warn(
+        'Observatory not identified. Using default T80S at Cerro Tololo')
     sitename = 'T80-South'
     mysite = EarthLocation(lat=-30.2*u.deg, lon=-70.8*u.deg, height=2200*u.m)
-    #utcoffset = 0*u.hour
-    #xlabel = 'UTC'
-    #tlabel = 'UTC'
+    # utcoffset = 0*u.hour
+    # xlabel = 'UTC'
+    # tlabel = 'UTC'
     minalt = 30
     tzwhere = tzwhere.tzwhere()
     timezone_str = tzwhere.tzNameAt(mysite.lat.value, mysite.lon.value)
@@ -547,11 +585,12 @@ else:
     inithour = '23:59:59'
 
 time = Time('%s %s' % (night_starts, inithour)) - utcoffset
-titlenight = 'Conditions at ' + (time + utcoffset).value[:-4] + ' LT for ' + sitename
+titlenight = 'Conditions at ' + \
+    (time + utcoffset).value[:-4] + ' LT for ' + sitename
 midnight = Time('%s 00:00:00' % night_ends) - utcoffset
 delta_midnight = np.linspace(-12, 12, 500)*u.hour
 frame_tonight = AltAz(obstime=midnight+delta_midnight,
-                          location=mysite)
+                      location=mysite)
 dec_inhour = np.float(inithour.split(':')[0])
 dec_inhour += np.float(inithour.split(':')[1]) / 60.
 dec_inhour += np.float(inithour.split(':')[2]) / 3600.
@@ -561,10 +600,12 @@ if dec_inhour > 12.:
 # coords frames
 times_time_overnight = midnight + delta_midnight
 frame_time_overnight = AltAz(obstime=times_time_overnight, location=mysite)
-sunaltazs_time_overnight = get_sun(times_time_overnight).transform_to(frame_time_overnight)
+sunaltazs_time_overnight = get_sun(
+    times_time_overnight).transform_to(frame_time_overnight)
 
 moon_time_overnight = get_moon(times_time_overnight)
-moonaltazs_time_overnight = moon_time_overnight.transform_to(frame_time_overnight)
+moonaltazs_time_overnight = moon_time_overnight.transform_to(
+    frame_time_overnight)
 
 # moon phase
 sun_pos = get_sun(time+utcoffset)
@@ -582,9 +623,9 @@ mb = int(moon_brightness*100)
 
 # start the figure
 if '--skychart' in sys.argv:
-    fig = plt.figure(figsize=(16,6))
-    ax1 = fig.add_subplot(1,2,1)
-    ax3 = fig.add_subplot(1,2,2, projection='polar')
+    fig = plt.figure(figsize=(16, 6))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax3 = fig.add_subplot(1, 2, 2, projection='polar')
 else:
     fig, ax1 = plt.subplots()
 
@@ -597,19 +638,21 @@ for myObj in myListObj:
         mycoords = SkyCoord(ra=myObj[1]*u.deg, dec=myObj[2]*u.deg)
 
     if blinit:
-        objhour, night_starts = standard_hour(myObj[3], night_starts, night_ends)
+        objhour, night_starts = standard_hour(
+            myObj[3], night_starts, night_ends)
     else:
         objhour = inithour
     objtime = Time('%s %s' % (night_starts, objhour)) - utcoffset
-    obj_dec_inhour =  np.float(objhour.split(':')[0])
+    obj_dec_inhour = np.float(objhour.split(':')[0])
     obj_dec_inhour += np.float(objhour.split(':')[1]) / 60.
     obj_dec_inhour += np.float(objhour.split(':')[2]) / 3600.
     if obj_dec_inhour > 12.:
         obj_dec_inhour = obj_dec_inhour - 24.
 
     inivalue = obj_dec_inhour
-    endvalue = delta_midnight[sunaltazs_time_overnight.alt < -18*u.deg].max().value
-    #observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
+    endvalue = delta_midnight[sunaltazs_time_overnight.alt < -
+                              18*u.deg].max().value
+    # observe_time = Time('%s 23:59:59.9' % night_for_chart) + np.arange(inivalue, endvalue, 1)*u.hour
     observe_time = time + np.arange(inivalue, endvalue, 1)*u.hour
 
     myaltaz = mycoords.transform_to(AltAz(obstime=objtime, location=mysite))
@@ -618,9 +661,11 @@ for myObj in myListObj:
 
     myaltazs_time_overnight = mycoords.transform_to(frame_time_overnight)
 
-    if isList:# if list
-        p = ax1.plot(delta_midnight, myaltazs_time_overnight.alt, label=myObj[0])
-        titlenight = 'Conditions for night starting at ' + (time + utcoffset).value[:10] + ' LT for ' + sitename
+    if isList:  # if list
+        p = ax1.plot(delta_midnight,
+                     myaltazs_time_overnight.alt, label=myObj[0])
+        titlenight = 'Conditions for night starting at ' + \
+            (time + utcoffset).value[:10] + ' LT for ' + sitename
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time, observe_time,
                      sunaltazs_time_overnight, obj_style={'color': p[0].get_color(),
@@ -632,19 +677,22 @@ for myObj in myListObj:
                 ax1.fill_between(delta_midnight,
                                  np.zeros(len(delta_midnight)),
                                  myaltazs_time_overnight.alt,
-                                 (delta_midnight.value >= obj_dec_inhour) & (delta_midnight.value <= (obj_dec_inhour + obj_bltime)),
+                                 (delta_midnight.value >= obj_dec_inhour) & (
+                                     delta_midnight.value <= (obj_dec_inhour + obj_bltime)),
                                  color=p[0].get_color())
             except:
-                warnings.warn('wrong time format for blocktime (should be seconds)')
-    else:# if single object
+                warnings.warn(
+                    'wrong time format for blocktime (should be seconds)')
+    else:  # if single object
         sc = ax1.scatter(delta_midnight, myaltazs_time_overnight.alt,
-                    c=myaltazs_time_overnight.az, label=myObj[0], lw=0, s=8,
-                    cmap='viridis')
+                         c=myaltazs_time_overnight.az, label=myObj[0], lw=0, s=8,
+                         cmap='viridis')
         if bl_time:
             ax1.fill_between(delta_midnight,
                              np.zeros(len(delta_midnight)),
                              myaltazs_time_overnight.alt,
-                             (delta_midnight.value >= dec_inhour) & (delta_midnight.value <= (dec_inhour + blocktime / 3600.)),
+                             (delta_midnight.value >= dec_inhour) & (
+                                 delta_midnight.value <= (dec_inhour + blocktime / 3600.)),
                              color='y')
         if '--skychart' in sys.argv:
             skychart(ax3, mysite, mycoords, time+utcoffset, observe_time,
@@ -653,7 +701,8 @@ for myObj in myListObj:
                                                           'c': np.arange(inivalue, endvalue, 1),
                                                           'label': myObj[0]}, hours_value=np.arange(inivalue, endvalue, 1))
 
-    text_pos = abs(delta_midnight.value - obj_dec_inhour) == abs(delta_midnight.value - obj_dec_inhour).min()
+    text_pos = abs(delta_midnight.value -
+                   obj_dec_inhour) == abs(delta_midnight.value - obj_dec_inhour).min()
     ax1.text(obj_dec_inhour - 0.3,
              myaltazs_time_overnight.alt.value[text_pos] - 3.0,
              '%i' % moon_pos.separation(mycoords).value, fontsize=10, color='c')
@@ -662,12 +711,14 @@ for myObj in myListObj:
 ax1.plot(delta_midnight, moonaltazs_time_overnight.alt, color='violet', ls='--',
          label=r'Moon: %i%%' % mb)
 ax1.fill_between(delta_midnight.to('hr').value, 0, 90,
-                 (sunaltazs_time_overnight.alt < -0*u.deg) & (sunaltazs_time_overnight.alt > -18*u.deg),
+                 (sunaltazs_time_overnight.alt < -0 *
+                  u.deg) & (sunaltazs_time_overnight.alt > -18*u.deg),
                  color='indigo', zorder=0)
 ax1.fill_between(delta_midnight.to('hr').value, 0, 90,
                  (moonaltazs_time_overnight.alt <= 0*u.deg) & (sunaltazs_time_overnight.alt < -18*u.deg), color='k', zorder=0)
 ax1.fill_between(delta_midnight.to('hr').value, 0, 90,
-                 (moonaltazs_time_overnight.alt > 0*u.deg) & (sunaltazs_time_overnight.alt < -18*u.deg),
+                 (moonaltazs_time_overnight.alt > 0 *
+                  u.deg) & (sunaltazs_time_overnight.alt < -18*u.deg),
                  color='midnightblue', alpha=1.1 - _moon_brightness, zorder=0)
 
 if '--skychart' in sys.argv:
@@ -677,13 +728,13 @@ if '--skychart' in sys.argv:
                                                   'label': 'moon: %i%%' % (moon_brightness*100)},
              hours_value=np.arange(inivalue, endvalue, 1))
     circle = plt.Circle((0., 0.), 90, transform=ax3.transData._b,
-                       color="red", alpha=0.7, zorder=0)
+                        color="red", alpha=0.7, zorder=0)
     ax3.add_artist(circle)
     circle = plt.Circle((0., 0.), 90-minalt, transform=ax3.transData._b,
-                       color="white", alpha=1., zorder=0)
+                        color="white", alpha=1., zorder=0)
     ax3.add_artist(circle)
     circle = plt.Circle((0., 0.), 90-minalt, transform=ax3.transData._b,
-                       color="black", alpha=1.1 - _moon_brightness, zorder=0)
+                        color="black", alpha=1.1 - _moon_brightness, zorder=0)
     ax3.add_artist(circle)
 if isList:
     if '--astrotime' in sys.argv:
@@ -692,10 +743,10 @@ if isList:
         if len(myListObj[0]) <= 20:
             if '--skychart' in sys.argv:
                 leg = plt.legend(loc='lower left', title='Astronomical time: %.2fh' % unt,
-                ncol=2, fancybox=True, fontsize=11, bbox_to_anchor=(.8, 0.), scatterpoints=1)
+                                 ncol=2, fancybox=True, fontsize=11, bbox_to_anchor=(.8, 0.), scatterpoints=1)
             else:
                 leg = plt.legend(loc='lower left', title='Astronomical time: %.2fh' % unt,
-                ncol=4, fancybox=True, fontsize=11)
+                                 ncol=4, fancybox=True, fontsize=11)
             leg.get_frame().set_alpha(0.9)
             leg.get_frame().set_edgecolor('white')
     else:
@@ -704,7 +755,8 @@ if isList:
                 leg = plt.legend(loc='lower left', ncol=2, fancybox=True,
                                  fontsize=11, bbox_to_anchor=(.8, -0.2), scatterpoints=1)
             else:
-                leg = plt.legend(loc='lower left', ncol=4, fancybox=True, fontsize=11)
+                leg = plt.legend(loc='lower left', ncol=4,
+                                 fancybox=True, fontsize=11)
             leg.get_frame().set_alpha(0.9)
             leg.get_frame().set_edgecolor('white')
 else:
@@ -713,13 +765,14 @@ else:
         unt -= delta_midnight.value[sunaltazs_time_overnight.alt <= -18*u.deg].min()
         if '--skychart' in sys.argv:
             leg = plt.legend(loc='center left', title='Astronomical time: %.2fh' % unt,
-            fancybox=True, scatterpoints=1, bbox_to_anchor=(.8, 0.))
+                             fancybox=True, scatterpoints=1, bbox_to_anchor=(.8, 0.))
         else:
             leg = plt.legend(loc='lower left', title='Astronomical time: %.2fh' % unt,
-            fancybox=True, scatterpoints=1)
+                             fancybox=True, scatterpoints=1)
     else:
         if '--skychart' in sys.argv:
-            leg = plt.legend(loc='lower left', scatterpoints=1, bbox_to_anchor=(1., 0.), fancybox=True)
+            leg = plt.legend(loc='lower left', scatterpoints=1,
+                             bbox_to_anchor=(1., 0.), fancybox=True)
         else:
             leg = plt.legend(loc='lower left', fancybox=True, scatterpoints=1)
     leg.get_frame().set_alpha(0.9)
