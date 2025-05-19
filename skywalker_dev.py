@@ -68,7 +68,8 @@ def parse_args():
                         help="File containing the coordinates of the observatory. \
                         Can be used as an alternative to observatory.")
     parser.add_argument("--minalt", type=float, required=False, default=30,
-                        help="Minimum altitude of the telescope in degrees. Default is 30.")
+                        help="Minimum altitude the telescope can safely go \
+                        in degrees. Default is 30.")
 
     # plot
     parser.add_argument("--skychart", "-sc", action="store_true",
@@ -98,6 +99,7 @@ class Skywalker:
         self.lat = args.lat
         self.lon = args.lon
         self.elev = args.elev
+        self.minalt = args.minalt
         self.site = args.site
         self.sitefile = args.sitefile
 
@@ -124,13 +126,13 @@ class Skywalker:
         self.blockinit = args.blockinit
         self.blocktime = args.blocktime
         self.target = None
-        self.target_list = []
+        self.target_list = pd.DataFrame()
 
         self.observatory = args.observatory
         self.observatoryfile = args.observatoryfile
         self.minalt = args.minalt
 
-        self.skychart = args.skychart
+        self.make_skychart = args.skychart
         self.noshow = args.noshow
 
         self.timezone = None
@@ -213,6 +215,10 @@ class Skywalker:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
             if self.blockinit:
+                if len(self.blockinit.split(':')) != 3:
+                    # TODO: check if format is HH:MM:SS. Ajust it if not
+                    raise ValueError(
+                        "Block init time should be in the format HH:MM:SS")
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -256,14 +262,15 @@ class Skywalker:
             raise ValueError(
                 "No target specified. Please provide a target name or coordinates.")
 
-    def skychart(self,
-                 ax,
-                 mycoords,
-                 observe_time,
-                 obj_style={'color': 'b'},
-                 hours_value=False
-                 ):
-        plot_sky(mycoords,
+    def set_skychart(self,
+                     ax,
+                     obj_coords,
+                     observe_time,
+                     obj_style={'color': 'b'},
+                     hours_value=False
+                     ):
+
+        plot_sky(obj_coords,
                  self.observer,
                  observe_time,
                  ax=ax,
@@ -271,74 +278,171 @@ class Skywalker:
                  hours_value=hours_value)
 
     def set_plot(self):
-        if args.skychart:
+        if self.make_skychart:
             fig = plt.figure(figzise=(16, 6))
             ax1 = fig.add_subplot(121)
             ax3 = fig.add_subplot(122, projection='polar')
         else:
-            fig, ax1 = plt.subplots(figsize=(16, 6))
+            fig, ax1 = plt.subplots(figsize=(8, 6))
+        plt.grid()
 
-        for myObj in self.target_list:
+        if self.target_list.index.size > 1:
+            is_list = True
+        else:
+            is_list = False
+
+        for index in self.target_list.index:
+            myObjdf = self.target_list.loc[index]
             objtime = Time(self.nightstarts + "T" + self.time,
                            format='isot') - self.utcoffset
-            mycoords = SkyCoord(ra=myObj.ra, dec=myObj.dec,
-                                obstime=objtime, frame='icrs')
-            # convert self.time to decimal hours
-            obj_dec_inihour = self.time.decimalhour
-            inivalue = self.time.decimalhour
-            endvalue = delta_midnight[self.sunaltaz_time_overnight.alt < -
-                                      18 * u.deg].max().value
+            obj_coords = SkyCoord(ra=myObjdf['RA'],
+                                  dec=myObjdf['DEC'],
+                                  unit=(self.raunit, 'deg'),
+                                  obstime=objtime, frame='icrs')
+
+            obj_dec_inihour = float(self.time.split(':')[0]) + \
+                float(self.time.split(':')[1]) / 60. + \
+                float(self.time.split(':')[2]) / 3600.
+            inivalue = obj_dec_inihour - 12
+            endvalue = self.delta_midnight[self.sunaltaz_time_overnight.alt < -
+                                           18 * u.deg].max().value
             observe_time = self.obs_time + \
                 np.arange(inivalue, endvalue, 1) * u.hour
 
-            myaltaz = myObj.transform_to(AltAz(obstime=observe_time,
-                                               location=self.location))
-            myaltaz_tonight = myObj.transform_to(self.frame_tonight)
-            myaltaz_overnight = myObj.transform_to(
+            block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
+                float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
+                float(myObjdf['BLINIT'].split(':')[2]) / 3600.
+            if block_starts > 12.:
+                block_starts -= 24
+
+            # myaltaz = obj_coords.transform_to(AltAz(obstime=observe_time,
+            #                                         location=self.location))
+            # myaltaz_tonight = obj_coords.transform_to(self.frame_tonight)
+            myaltaz_overnight = obj_coords.transform_to(
                 self.frame_time_overnight)
 
-            p = ax1.plot(self.delta_midnight.value,
-                         myaltaz_overnight.alt.value, label=myObj['name'])
+            if is_list:
+                p = ax1.plot(self.delta_midnight.value,
+                             myaltaz_overnight.alt.value,
+                             label=myObjdf['NAME'],
+                             zorder=11)
 
-            if args.skychart:
-                self.skychart(ax3, self.location, mycoords, self.obs_time,
-                              observe_time,
-                              self.sunaltaz_time_overnight.alt.value,
-                              obs_style={'color': p[0].get_color(),
-                                         'marker': '*',
-                                         'label': myObj['name']},
-                              hours_value=np.arange(inivalue, endvalue, 1))
+                if block_starts is not None:
+                    if myObjdf['BLOCKTIME'] > 0:
+                        blocktime = float(myObjdf['BLOCKTIME']) * u.s
+                        blocktime = blocktime.to(u.hour).value
+                        block_ends = block_starts + blocktime
+                        ax1.fill_between(self.delta_midnight.to('hr').value,
+                                         np.zeros(
+                                             len(self.delta_midnight.value)),
+                                         myaltaz_overnight.alt.value,
+                                         (self.delta_midnight.value >= block_starts) & (
+                            self.delta_midnight.value <= block_ends),
+                            color=p[0].get_color(),
+                            zorder=11)
+                    else:
+                        print("Block time is 0")
+
+                if self.make_skychart:
+                    self.set_skychart(ax3, self.location, obj_coords, self.obs_time,
+                                      observe_time,
+                                      self.sunaltaz_time_overnight.alt.value,
+                                      obs_style={'color': p[0].get_color(),
+                                                 'marker': '*',
+                                                 'label': myObj['NAME']},
+                                      hours_value=np.arange(inivalue, endvalue, 1))
             else:
                 sc = ax1.scatter(self.delta_midnight.value,
                                  myaltaz_overnight.alt.value,
                                  c=myaltaz_overnight.az.value,
-                                 label=myObj['name'],
-                                 lw=0, s=8, cmap='viridis')
-                if args.skychart:
-                    self.skychart(ax3, self.location, mycoords,
-                                  self.obs_time + self.utcoffset, observe_time,
-                                  self.sunaltaz_time_overnight.alt.value,
-                                  obs_style={'cmap': 'viridis',
-                                             'marker': '*',
-                                             'c': np.arange(inivalue, endvalue, 1),
-                                             'label': myObj['name']},
-                                  hours_value=np.arange(inivalue, endvalue, 1))
+                                 label=myObjdf['NAME'],
+                                 lw=0, s=8, cmap='viridis',
+                                 zorder=11)
+                plt.colorbar(sc, pad=0.1).set_label('Azimuth [deg]')
+                if block_starts is not None:
+                    if myObjdf['BLOCKTIME'] > 0:
+                        blocktime = float(myObjdf['BLOCKTIME']) * u.s
+                        blocktime = blocktime.to(u.hour).value
+                        block_ends = block_starts + blocktime
+                        ax1.fill_between(self.delta_midnight.to('hr').value,
+                                         np.zeros(
+                                             len(self.delta_midnight.value)),
+                                         myaltaz_overnight.alt.value,
+                                         (self.delta_midnight.value >= block_starts) & (
+                            self.delta_midnight.value <= block_ends),
+                            color='orange', zorder=11)
+                    else:
+                        print("Block time is 0")
 
-        ax1.plot(self.delta_midnight.value,
+                if self.make_skychart:
+                    self.set_skychart(ax3, self.location, obj_coords,
+                                      self.obs_time + self.utcoffset, observe_time,
+                                      self.sunaltaz_time_overnight.alt.value,
+                                      obs_style={'cmap': 'viridis',
+                                                 'marker': '*',
+                                                 'c': np.arange(inivalue, endvalue, 1),
+                                                 'label': myObjdf['NAME']},
+                                      hours_value=np.arange(inivalue, endvalue, 1))
+
+            # add distance to the moon at the time of the observation
+            moon_distance = self.moon.separation(obj_coords).value
+            text_position = abs(self.delta_midnight.value - block_starts) == \
+                abs(self.delta_midnight.value - block_starts).min()
+            ax1.text(block_starts - 0.3,
+                     myaltaz_overnight.alt.value[text_position] - 3,
+                     "%i" % moon_distance,
+                     fontsize=10, color='c')
+
+        ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
-                 color='violet', ls='--', label='Moon')
+                 color='violet', ls='--', label='Moon', zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -18 * u.deg),
                          color='indigo', zorder=0)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
-                         (self.moon_altaz_time_overnight.alt < 0 *
-                          u.deg) & (self.moonaltaz_time_overnight.alt < -18 * u.deg),
-                         color='k', zorder=0)
+                         (self.moonaltaz_time_overnight.alt < 0 *
+                          u.deg) & (self.sunaltaz_time_overnight.alt < -18 * u.deg),
+                         color='k', zorder=1)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.moonaltaz_time_overnight.alt > 0 *
-                          u.deg) & (self.moonaltaz_time_overnight.alt < -18 * u.deg),
-                         color='midnightblue', alpha=1.1 - moon_brightness, zorder=0)
+                          u.deg) & (self.sunaltaz_time_overnight.alt < -18 * u.deg),
+                         color='midnightblue',
+                         alpha=1.1 - self.moon_brightness.value,
+                         zorder=2)
+        minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].min() - 1
+        maxx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].max() + 1
+        if self.minalt > 1:
+            ax1.plot([minx, maxx],
+                     [self.minalt, self.minalt], '--', c='r')
+        ax1.set_xlim(minx, maxx)
+        ax1.set_ylim(0, 90)
+        ax1.set_xlabel(f'Local Time [UTC{int(self.utcoffset.value)}]')
+        xt = ax1.get_xticks()
+        xt[xt < 0] += 24
+        ax1.set_xticklabels(['%i' % n for n in xt])
+        ax1.set_ylabel('Altitude [deg]')
+        titlenight = f"Night starts: {self.nightstarts}"
+        ax1.set_title(titlenight, fontsize=11)
+        ax1.legend(loc='upper right', fontsize=8)
+
+        ax2 = ax1.twinx()
+        altitude = ax1.get_yticks() * u.deg
+        airmass = 1. / np.cos(90 * u.deg - altitude)
+        ax2.set_ylabel('Airmass')
+        myticks = []
+        for airval in airmass:
+            if airval > 10:
+                myticks.append('')
+            else:
+                myticks.append('%.2f' % airval)
+        ax2.set_yticklabels(myticks)
+        ax2.set_ylim(0, 90)
+
+        plt.tight_layout()
+        plt.show()
 
     def main(self):
         self.set_location()
@@ -347,6 +451,7 @@ class Skywalker:
         self.set_target()
         self.set_night_frames()
         self.set_target_list()
+        self.set_plot()
 
 
 if __name__ == "__main__":
