@@ -76,21 +76,39 @@ def parse_args():
     parser.add_argument("--skychart", "-sc", action="store_true",
                         help="Plot the sky chart for the target(s) starting at \
                         the time given by --time.")
-    parser.add_argument("--noshow", action="store_true",
-                        help="Do not show the plot.")
+    parser.add_argument("--savefig", action="store_true",
+                        help="Save the figure.")
+    parser.add_argument("--figname", "-fn", type=str, required=False,
+                        help="Name of the figure to save. \
+                        Default is skywalker_<nightstarts>.png.")
+
+    # logging
+    parser.add_argument("--logfile", type=str, default='skywalker.log',
+                        help="Log file to save the log messages.")
+    parser.add_argument("--loglevel", type=str, default='INFO',
+                        help="Log level. Options: [DEBUG, INFO, WARNING, ERROR, CRITICAL]. \
+                        Default is INFO.")
 
     return parser.parse_args()
 
 
-def logger():
-    logger = logging.getLogger("skywalker")
-    logger.setLevel(logging.INFO)
+def logger(logfile=None, loglevel=logging.INFO):
+    logger = logging.getLogger(__name__)
+
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        "%(asctime)s [%(levelname)s] @%(module)s.%(funcName)s() %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S")
+
     ch.setFormatter(formatter)
     logger.addHandler(ch)
+    logger.setLevel(loglevel)
+
+    if logfile is not None:
+        fh = logging.FileHandler(logfile)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+
     return logger
 
 
@@ -136,21 +154,26 @@ class Skywalker:
         self.minalt = args.minalt
 
         self.make_skychart = args.skychart
-        self.noshow = args.noshow
+        self.savefig = args.savefig
+        self.figname = args.figname
 
         self.timezone = None
         self.nighttime = None
         self.observer = None
         self.utcoffset = None
 
+        self.logfile = args.logfile
+        self.loglevel = args.loglevel
+        self.logger = logger(self.logfile, self.loglevel)
+
     def set_location(self):
-        if self.sitefile:
+        if self.sitefile is not None:
             if not os.path.isfile(self.sitefile):
                 raise ValueError(f"File {self.sitefile} not found.")
             else:
                 df = pd.read_csv(self.sitefile)
-            self.location = EarthLocation(lat=df['LAT'][0] * u.deg,
-                                          lon=df['LON'][0] * u.deg,
+            self.location = EarthLocation(lat=df['LAT'][0],
+                                          lon=df['LON'][0],
                                           height=df['ELEV'][0] * u.m)
             self.sitename = df['NAME'][0]
         elif self.site is not None:
@@ -165,7 +188,7 @@ class Skywalker:
                                           lon=self.lon * u.deg,
                                           height=self.elev * u.m)
             self.sitename = f"{self.lat} {self.lon}"
-        logger().info(f"Location set to {self.location}")
+        self.logger.info(f"Location set to {self.location}")
 
     def set_observer(self):
         self.observer = Observer(self.location)
@@ -173,14 +196,15 @@ class Skywalker:
     def set_time(self):
         self.nighttime = Time(self.nightstarts + "T" +
                               self.time, scale='utc', format='isot')
-        logger().info(f"Time set to {self.time}")
+        self.logger.info(f"Time set to {self.time}")
         if not self.time:
             self.inithour = "23:59:59"
         else:
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
         tf = TimezoneFinder()
-        timezone_str = tf.timezone_at(lng=self.lon, lat=self.lat)
+        timezone_str = tf.timezone_at(
+            lng=self.location.lon.value, lat=self.location.lat.value)
         self.timezone = pytz.timezone(timezone_str)
         dt = self.nighttime.datetime
         self.utcoffset = (self.timezone.utcoffset(
@@ -192,24 +216,26 @@ class Skywalker:
         if self.object:
             self.target = SkyCoord.from_name(self.object)
         elif ra and dec:
-            self.target = SkyCoord(ra=self.ra * u.deg,
-                                   dec=self.dec * u.deg)
+            self.target = SkyCoord(ra=self.ra,
+                                   dec=self.dec,
+                                   unit=(self.raunit, 'deg'))
         elif self.file:
             if not os.path.isfile(self.file):
                 raise ValueError(f"File {self.file} not found.")
             else:
-                logger().info(f"File {self.file} found.")
+                self.logger.info(f"File {self.file} found.")
                 self.load_file = True
         else:
             raise ValueError("No target specified.")
 
     def set_night_frames(self):
-        observer_time = self.nighttime + self.utcoffset
-        night_ends = observer_time + 1 * u.day
-        midnight = Time(night_ends.jd - 0.5, format='jd') + self.utcoffset
+        observer_time = self.nighttime - self.utcoffset
+        night_ends = (observer_time + .5 * u.day).strftime('%Y-%m-%d')
+        midnight = Time(f"{night_ends}T00:00:00",
+                        format='isot') - self.utcoffset
         self.delta_midnight = np.linspace(-12, 12, 500) * u.hour
-        self.frame_tonight = AltAz(obstime=observer_time + self.delta_midnight,
-                                   location=self.location)
+        # self.frame_tonight = AltAz(obstime=observer_time + self.delta_midnight,
+        #                            location=self.location)
         self.times_time_overnight = midnight + self.delta_midnight
         self.frame_time_overnight = AltAz(obstime=self.times_time_overnight,
                                           location=self.location)
@@ -320,29 +346,30 @@ class Skywalker:
                                          0 * u.deg].max() + 1
         for index in self.target_list.index:
             myObjdf = self.target_list.loc[index]
-            objtime = Time(self.nightstarts + "T" + self.time,
-                           format='isot') - self.utcoffset
+            # objtime = Time(self.nightstarts + "T" + self.time,
+            #                format='isot') - self.utcoffset
             obj_coords = SkyCoord(ra=myObjdf['RA'],
                                   dec=myObjdf['DEC'],
-                                  unit=(self.raunit, 'deg'),
-                                  obstime=objtime, frame='icrs')
+                                  unit=(self.raunit, 'deg'))
 
-            obj_dec_inihour = float(self.time.split(':')[0]) + \
-                float(self.time.split(':')[1]) / 60. + \
-                float(self.time.split(':')[2]) / 3600.
-            if obj_dec_inihour > 12.:
-                obj_dec_inihour -= 24
+            # obj_dec_inihour = float(self.time.split(':')[0]) + \
+            #     float(self.time.split(':')[1]) / 60. + \
+            #     float(self.time.split(':')[2]) / 3600.
+            # if obj_dec_inihour > 12.:
+            #     obj_dec_inihour -= 24
             block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
                 float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
                 float(myObjdf['BLINIT'].split(':')[2]) / 3600.
             if block_starts > 12.:
                 block_starts -= 24
 
-            # myaltaz = obj_coords.transform_to(AltAz(obstime=observe_time,
-            #                                         location=self.location))
-            # myaltaz_tonight = obj_coords.transform_to(self.frame_tonight)
+            # myaltaz = obj_coords.transform_to(
+            #     AltAz(obstime=objtime, location=self.location))
+            # myaltaz_tonight = obj_coords.transform_to(
+                # self.frame_tonight)
             myaltaz_overnight = obj_coords.transform_to(
                 self.frame_time_overnight)
+
             mask = myaltaz_overnight.alt > 0 * u.deg
             mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
             inivalue = self.delta_midnight[mask].min().value
@@ -355,6 +382,9 @@ class Skywalker:
             hours_values[hours_values < -0.5] += 24
             hours_values[(hours_values > -0.5) & (
                 hours_values < 0.5)] = 0
+
+            import pdb
+            pdb.set_trace()
 
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
@@ -411,6 +441,8 @@ class Skywalker:
                         print("Block time is 0")
 
                 if self.make_skychart:
+                    import pdb
+                    pdb.set_trace()
                     self.set_skychart(self.observer, obj_coords,
                                       observe_time, ax3,
                                       obj_style={'cmap': 'viridis',
@@ -423,13 +455,12 @@ class Skywalker:
             moon_distance = self.moon.separation(obj_coords).value
             text_position = abs(self.delta_midnight.value - block_starts) == \
                 abs(self.delta_midnight.value - block_starts).min()
-            # interpolate myaltaz_overnight to get the altitude at the time of the block
             if myaltaz_overnight.alt.value[text_position].size == 0:
-                logger().warning(
+                self.logger.warning(
                     f"Could not find altitude for {myObjdf['NAME']} at {block_starts}")
                 altitude_position = 0.0
             elif myaltaz_overnight.alt.value[text_position].size > 1:
-                logger().warning(
+                self.logger.warning(
                     f"Found more than one altitude for {myObjdf['NAME']} at {block_starts}")
                 altitude_position = myaltaz_overnight.alt.value[text_position].mean(
                 )
@@ -439,11 +470,13 @@ class Skywalker:
             ax1.text(block_starts - 0.3,
                      altitude_position - 3,
                      "%i" % moon_distance,
-                     fontsize=10, color='pink')
+                     fontsize=10, color='pink', zorder=12)
 
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
-                 color='c', ls='--', label='Moon', zorder=10)
+                 color='c', ls='--',
+                 label='Moon: %i' % (self.moon_brightness.value * 100),
+                 zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -18 * u.deg),
@@ -522,6 +555,20 @@ class Skywalker:
                    bbox_to_anchor=(1., -0.1))
 
         plt.tight_layout()
+
+        if self.savefig:
+            if self.figname:
+                fig.savefig(self.figname, dpi=300,
+                            bbox_inches='tight')
+                self.logger.info(
+                    f"Figure saved as {self.figname}")
+                print(f"Figure saved as {self.figname}")
+            else:
+                fig.savefig(f"skywalker_{self.nightstarts}.png",
+                            dpi=300, bbox_inches='tight')
+                self.logger.info(
+                    f"Figure saved as skywalker_{self.nightstarts}.png")
+                print(f"Figure saved as skywalker_{self.nightstarts}.png")
         plt.show()
 
     def main(self):
