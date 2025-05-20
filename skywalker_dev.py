@@ -68,7 +68,7 @@ def parse_args():
     parser.add_argument("--observatoryfile", "-of", type=str, required=False,
                         help="File containing the coordinates of the observatory. \
                         Can be used as an alternative to observatory.")
-    parser.add_argument("--minalt", type=float, required=False, default=30,
+    parser.add_argument("--minalt", type=float, required=False, default=10,
                         help="Minimum altitude the telescope can safely go \
                         in degrees. Default is 30.")
 
@@ -318,12 +318,6 @@ class Skywalker:
                 float(self.time.split(':')[2]) / 3600.
             if obj_dec_inihour > 12.:
                 obj_dec_inihour -= 24
-            inivalue = obj_dec_inihour
-            endvalue = self.delta_midnight[self.sunaltaz_time_overnight.alt < -
-                                           18 * u.deg].max().value
-            observe_time = self.obs_time + \
-                np.arange(inivalue, endvalue, 1) * u.hour
-
             block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
                 float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
                 float(myObjdf['BLINIT'].split(':')[2]) / 3600.
@@ -335,6 +329,18 @@ class Skywalker:
             # myaltaz_tonight = obj_coords.transform_to(self.frame_tonight)
             myaltaz_overnight = obj_coords.transform_to(
                 self.frame_time_overnight)
+            mask = myaltaz_overnight.alt > 0 * u.deg
+            mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
+            inivalue = self.delta_midnight[mask].min().value
+            endvalue = self.delta_midnight[mask].max().value
+            init_observable = self.frame_time_overnight[mask].obstime.min()
+
+            observe_time = init_observable + \
+                np.arange(inivalue, endvalue, 1) * u.hour
+            hours_values = np.arange(inivalue, endvalue, 1)
+            hours_values[hours_values < -0.5] += 24
+            hours_values[(hours_values > -0.5) & (
+                hours_values < 0.5)] = 0
 
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
@@ -359,16 +365,14 @@ class Skywalker:
                         print("Block time is 0")
 
                 if self.make_skychart:
-                    observe_time = self.obs_time + \
-                        np.arange(inivalue, endvalue, 1) * u.hour
-                    hours_values = np.arange(inivalue, endvalue, 1)
-                    hours_values[hours_values < 0] += 24
                     self.set_skychart(self.observer, obj_coords,
                                       observe_time, ax3,
                                       obj_style={'color': p[0].get_color(),
                                                  'marker': '*',
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
+                    print("obj_coords:", obj_coords,
+                          "observe_time:", observe_time)
             else:
                 sc = ax1.scatter(self.delta_midnight.value,
                                  myaltaz_overnight.alt.value,
@@ -393,14 +397,13 @@ class Skywalker:
                         print("Block time is 0")
 
                 if self.make_skychart:
-                    self.set_skychart(ax3, self.location, obj_coords,
-                                      self.obs_time + self.utcoffset, observe_time,
-                                      self.sunaltaz_time_overnight.alt.value,
-                                      obs_style={'cmap': 'viridis',
+                    self.set_skychart(self.observer, obj_coords,
+                                      observe_time, ax3,
+                                      obj_style={'cmap': 'viridis',
                                                  'marker': '*',
                                                  'c': np.arange(inivalue, endvalue, 1),
                                                  'label': myObjdf['NAME']},
-                                      hours_value=np.arange(inivalue, endvalue, 1))
+                                      hours_value=hours_values)
 
             # add distance to the moon at the time of the observation
             moon_distance = self.moon.separation(obj_coords).value
@@ -441,6 +444,39 @@ class Skywalker:
                          color='midnightblue',
                          alpha=1.1 - self.moon_brightness.value,
                          zorder=2)
+
+        if self.make_skychart:
+            # plot the moon into skychart
+            mask = self.sunaltaz_time_overnight.alt < 0 * u.deg
+            mask &= self.moonaltaz_time_overnight.alt > 0 * u.deg
+            init_moon_time = self.delta_midnight[mask].min().value
+            end_moon_time = self.delta_midnight[mask].max().value
+
+            moon_time = self.moonaltaz_time_overnight.obstime[mask].min() + \
+                np.arange(init_moon_time, end_moon_time, 1) * u.hour
+            moon_hours = np.arange(init_moon_time, end_moon_time, 1)
+            moon_hours[moon_hours < -0.5] += 24
+            moon_hours[(moon_hours > -0.5) & (
+                moon_hours < 0.5)] = 0
+
+            self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
+                                                      dec=self.moon.dec),
+                              moon_time.isot, ax3,
+                              obj_style={'color': 'c',
+                                         'marker': 'o',
+                                         'label': 'Moon: %i' % self.moon_brightness.value * 100},
+                              hours_value=moon_hours)
+
+            circle = plt.Circle((0., 0.), 90, transform=ax3.transData._b,
+                                color="red", alpha=0.7, zorder=0)
+            ax3.add_artist(circle)
+            circle = plt.Circle((0., 0.), 90 - self.minalt, transform=ax3.transData._b,
+                                color="white", alpha=1., zorder=0)
+            ax3.add_artist(circle)
+            circle = plt.Circle((0., 0.), 90 - self.minalt, transform=ax3.transData._b,
+                                color="black", alpha=1.1 - self.moon_brightness.value, zorder=0)
+            ax3.add_artist(circle)
+
         if self.minalt > 1:
             ax1.plot([minx, maxx],
                      [self.minalt, self.minalt], '--', c='r')
