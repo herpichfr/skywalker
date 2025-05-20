@@ -196,15 +196,15 @@ class Skywalker:
         self.delta_midnight = np.linspace(-12, 12, 500) * u.hour
         self.frame_tonight = AltAz(obstime=observer_time + self.delta_midnight,
                                    location=self.location)
-        times_time_overnight = midnight + self.delta_midnight
-        self.frame_time_overnight = AltAz(obstime=times_time_overnight,
+        self.times_time_overnight = midnight + self.delta_midnight
+        self.frame_time_overnight = AltAz(obstime=self.times_time_overnight,
                                           location=self.location)
         self.sun = get_body('sun', self.obs_time, self.location)
         self.moon = get_body('moon', self.obs_time, location=self.location)
         self.sunaltaz_time_overnight = get_body(
-            'sun', times_time_overnight).transform_to(self.frame_time_overnight)
+            'sun', self.times_time_overnight).transform_to(self.frame_time_overnight)
         self.moonaltaz_time_overnight = get_body(
-            'moon', times_time_overnight).transform_to(self.frame_time_overnight)
+            'moon', self.times_time_overnight).transform_to(self.frame_time_overnight)
         elongation = self.sun.separation(self.moon)
         moon_phase = np.arctan2(self.sun.distance * np.sin(elongation),
                                 self.moon.distance - self.sun.distance * np.cos(elongation))
@@ -271,23 +271,24 @@ class Skywalker:
                 "No target specified. Please provide a target name or coordinates.")
 
     def set_skychart(self,
-                     ax,
+                     observer,
                      obj_coords,
                      observe_time,
+                     ax,
                      obj_style={'color': 'b'},
-                     hours_value=False
+                     hours_value=None
                      ):
 
         plot_sky(obj_coords,
-                 self.observer,
+                 observer,
                  observe_time,
                  ax=ax,
-                 style_kwrds=obj_style,
+                 style_kwargs=obj_style,
                  hours_value=hours_value)
 
     def set_plot(self):
         if self.make_skychart:
-            fig = plt.figure(figzise=(16, 6))
+            fig = plt.figure(figsize=(16, 6))
             ax1 = fig.add_subplot(121)
             ax3 = fig.add_subplot(122, projection='polar')
         else:
@@ -299,6 +300,10 @@ class Skywalker:
         else:
             is_list = False
 
+        minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].min() - 1
+        maxx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].max() + 1
         for index in self.target_list.index:
             myObjdf = self.target_list.loc[index]
             objtime = Time(self.nightstarts + "T" + self.time,
@@ -311,7 +316,9 @@ class Skywalker:
             obj_dec_inihour = float(self.time.split(':')[0]) + \
                 float(self.time.split(':')[1]) / 60. + \
                 float(self.time.split(':')[2]) / 3600.
-            inivalue = obj_dec_inihour - 12
+            if obj_dec_inihour > 12.:
+                obj_dec_inihour -= 24
+            inivalue = obj_dec_inihour
             endvalue = self.delta_midnight[self.sunaltaz_time_overnight.alt < -
                                            18 * u.deg].max().value
             observe_time = self.obs_time + \
@@ -352,13 +359,16 @@ class Skywalker:
                         print("Block time is 0")
 
                 if self.make_skychart:
-                    self.set_skychart(ax3, self.location, obj_coords, self.obs_time,
-                                      observe_time,
-                                      self.sunaltaz_time_overnight.alt.value,
-                                      obs_style={'color': p[0].get_color(),
+                    observe_time = self.obs_time + \
+                        np.arange(inivalue, endvalue, 1) * u.hour
+                    hours_values = np.arange(inivalue, endvalue, 1)
+                    hours_values[hours_values < 0] += 24
+                    self.set_skychart(self.observer, obj_coords,
+                                      observe_time, ax3,
+                                      obj_style={'color': p[0].get_color(),
                                                  'marker': '*',
-                                                 'label': myObj['NAME']},
-                                      hours_value=np.arange(inivalue, endvalue, 1))
+                                                 'label': myObjdf['NAME']},
+                                      hours_value=hours_values)
             else:
                 sc = ax1.scatter(self.delta_midnight.value,
                                  myaltaz_overnight.alt.value,
@@ -431,10 +441,6 @@ class Skywalker:
                          color='midnightblue',
                          alpha=1.1 - self.moon_brightness.value,
                          zorder=2)
-        minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
-                                         0 * u.deg].min() - 1
-        maxx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
-                                         0 * u.deg].max() + 1
         if self.minalt > 1:
             ax1.plot([minx, maxx],
                      [self.minalt, self.minalt], '--', c='r')
