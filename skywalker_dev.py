@@ -103,6 +103,7 @@ class Skywalker:
         self.minalt = args.minalt
         self.site = args.site
         self.sitefile = args.sitefile
+        self.sitename = None
 
         self.nightstarts = args.nightstarts
         self.time = args.time if args.time else "23:59:59"
@@ -144,13 +145,26 @@ class Skywalker:
 
     def set_location(self):
         if self.sitefile:
-            self.location = EarthLocation.from_file(self.sitefile)
-        elif self.site:
-            self.location = EarthLocation.of_site(self.site)
+            if not os.path.isfile(self.sitefile):
+                raise ValueError(f"File {self.sitefile} not found.")
+            else:
+                df = pd.read_csv(self.sitefile)
+            self.location = EarthLocation(lat=df['LAT'][0] * u.deg,
+                                          lon=df['LON'][0] * u.deg,
+                                          height=df['ELEV'][0] * u.m)
+            self.sitename = df['NAME'][0]
+        elif self.site is not None:
+            try:
+                self.location = EarthLocation.of_site(self.site)
+            except ValueError:
+                raise ValueError(
+                    f"Site '{self.site}' not found in the database.")
+            self.sitename = self.site
         else:
             self.location = EarthLocation(lat=self.lat * u.deg,
                                           lon=self.lon * u.deg,
                                           height=self.elev * u.m)
+            self.sitename = f"{self.lat} {self.lon}"
         logger().info(f"Location set to {self.location}")
 
     def set_observer(self):
@@ -425,11 +439,11 @@ class Skywalker:
             ax1.text(block_starts - 0.3,
                      altitude_position - 3,
                      "%i" % moon_distance,
-                     fontsize=10, color='c')
+                     fontsize=10, color='pink')
 
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
-                 color='violet', ls='--', label='Moon', zorder=10)
+                 color='c', ls='--', label='Moon', zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -18 * u.deg),
@@ -464,7 +478,7 @@ class Skywalker:
                               moon_time.isot, ax3,
                               obj_style={'color': 'c',
                                          'marker': 'o',
-                                         'label': 'Moon: %i' % self.moon_brightness.value * 100},
+                                         'label': 'Moon: %i' % (self.moon_brightness.value * 100)},
                               hours_value=moon_hours)
 
             circle = plt.Circle((0., 0.), 90, transform=ax3.transData._b,
@@ -487,7 +501,7 @@ class Skywalker:
         xt[xt < 0] += 24
         ax1.set_xticklabels(['%i' % n for n in xt])
         ax1.set_ylabel('Altitude [deg]')
-        titlenight = f"Night starts: {self.nightstarts}"
+        titlenight = f"Night starts: {self.nightstarts} @ {self.sitename}"
         ax1.set_title(titlenight, fontsize=11)
         ax1.legend(loc='upper right', fontsize=8)
 
@@ -503,6 +517,9 @@ class Skywalker:
                 myticks.append('%.2f' % airval)
         ax2.set_yticklabels(myticks)
         ax2.set_ylim(0, 90)
+
+        ax3.legend(loc='lower right', fontsize=8,
+                   bbox_to_anchor=(1., -0.1))
 
         plt.tight_layout()
         plt.show()
