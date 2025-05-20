@@ -1,5 +1,6 @@
 #!/bin/python3
 
+import os
 import numpy as np
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_body
 from astropy.time import Time
@@ -122,6 +123,7 @@ class Skywalker:
         self.raunit = args.raunit
         self.obj_nme = args.obj_nme
         self.file = args.file
+        self.load_file = False
         self.pid = args.pid
         self.blockinit = args.blockinit
         self.blocktime = args.blocktime
@@ -178,6 +180,12 @@ class Skywalker:
         elif ra and dec:
             self.target = SkyCoord(ra=self.ra * u.deg,
                                    dec=self.dec * u.deg)
+        elif self.file:
+            if not os.path.isfile(self.file):
+                raise ValueError(f"File {self.file} not found.")
+            else:
+                logger().info(f"File {self.file} found.")
+                self.load_file = True
         else:
             raise ValueError("No target specified.")
 
@@ -203,7 +211,7 @@ class Skywalker:
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
 
     def set_target_list(self):
-        if self.file:
+        if self.load_file:
             df = pd.read_csv(self.file)
             if self.pid:
                 df = df[df['PID'] == self.pid]
@@ -388,8 +396,21 @@ class Skywalker:
             moon_distance = self.moon.separation(obj_coords).value
             text_position = abs(self.delta_midnight.value - block_starts) == \
                 abs(self.delta_midnight.value - block_starts).min()
+            # interpolate myaltaz_overnight to get the altitude at the time of the block
+            if myaltaz_overnight.alt.value[text_position].size == 0:
+                logger().warning(
+                    f"Could not find altitude for {myObjdf['NAME']} at {block_starts}")
+                altitude_position = 0.0
+            elif myaltaz_overnight.alt.value[text_position].size > 1:
+                logger().warning(
+                    f"Found more than one altitude for {myObjdf['NAME']} at {block_starts}")
+                altitude_position = myaltaz_overnight.alt.value[text_position].mean(
+                )
+            else:
+                altitude_position = myaltaz_overnight.alt.value[text_position]
+
             ax1.text(block_starts - 0.3,
-                     myaltaz_overnight.alt.value[text_position] - 3,
+                     altitude_position - 3,
                      "%i" % moon_distance,
                      fontsize=10, color='c')
 
