@@ -372,19 +372,17 @@ class Skywalker:
 
             mask = myaltaz_overnight.alt > 0 * u.deg
             mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
-            inivalue = self.delta_midnight[mask].min().value
-            endvalue = self.delta_midnight[mask].max().value
-            init_observable = self.frame_time_overnight[mask].obstime.min()
+            # inivalue = self.delta_midnight[mask].min().value
+            # endvalue = self.delta_midnight[mask].max().value
+            init_observable = self.frame_time_overnight[mask].obstime.min(
+            )
+            end_observable = self.frame_time_overnight[mask].obstime.max(
+            )
+            observe_time = Time(np.arange(init_observable.jd,
+                                          end_observable.jd, 1/24), format='jd')
 
-            observe_time = init_observable + \
-                np.arange(inivalue, endvalue, 1) * u.hour
-            hours_values = np.arange(inivalue, endvalue, 1)
-            hours_values[hours_values < -0.5] += 24
-            hours_values[(hours_values > -0.5) & (
-                hours_values < 0.5)] = 0
-
-            import pdb
-            pdb.set_trace()
+            hours_values = np.array([obs_time.datetime.hour + self.utcoffset.value +
+                                     obs_time.datetime.minute / 60. for obs_time in observe_time])
 
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
@@ -447,7 +445,7 @@ class Skywalker:
                                       observe_time, ax3,
                                       obj_style={'cmap': 'viridis',
                                                  'marker': '*',
-                                                 'c': np.arange(inivalue, endvalue, 1),
+                                                 'c': myaltaz_overnight.az.value,
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
 
@@ -496,15 +494,13 @@ class Skywalker:
             # plot the moon into skychart
             mask = self.sunaltaz_time_overnight.alt < 0 * u.deg
             mask &= self.moonaltaz_time_overnight.alt > 0 * u.deg
-            init_moon_time = self.delta_midnight[mask].min().value
-            end_moon_time = self.delta_midnight[mask].max().value
+            init_moon_time = self.moonaltaz_time_overnight.obstime[mask].min()
+            end_moon_time = self.moonaltaz_time_overnight.obstime[mask].max()
 
-            moon_time = self.moonaltaz_time_overnight.obstime[mask].min() + \
-                np.arange(init_moon_time, end_moon_time, 1) * u.hour
-            moon_hours = np.arange(init_moon_time, end_moon_time, 1)
-            moon_hours[moon_hours < -0.5] += 24
-            moon_hours[(moon_hours > -0.5) & (
-                moon_hours < 0.5)] = 0
+            moon_time = Time(np.arange(init_moon_time.jd,
+                                       end_moon_time.jd, 1/24), format='jd')
+            moon_hours = np.array([obs_time.datetime.hour + self.utcoffset.value +
+                                   obs_time.datetime.minute / 60. for obs_time in moon_time])
 
             self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
                                                       dec=self.moon.dec),
