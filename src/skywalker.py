@@ -363,17 +363,12 @@ class Skywalker:
             if block_starts > 12.:
                 block_starts -= 24
 
-            # myaltaz = obj_coords.transform_to(
-            #     AltAz(obstime=objtime, location=self.location))
-            # myaltaz_tonight = obj_coords.transform_to(
-                # self.frame_tonight)
             myaltaz_overnight = obj_coords.transform_to(
                 self.frame_time_overnight)
 
             mask = myaltaz_overnight.alt > 0 * u.deg
             mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
-            # inivalue = self.delta_midnight[mask].min().value
-            # endvalue = self.delta_midnight[mask].max().value
+
             init_observable = self.frame_time_overnight[mask].obstime.min(
             )
             end_observable = self.frame_time_overnight[mask].obstime.max(
@@ -439,13 +434,11 @@ class Skywalker:
                         print("Block time is 0")
 
                 if self.make_skychart:
-                    import pdb
-                    pdb.set_trace()
                     self.set_skychart(self.observer, obj_coords,
                                       observe_time, ax3,
                                       obj_style={'cmap': 'viridis',
                                                  'marker': '*',
-                                                 'c': myaltaz_overnight.az.value,
+                                                 'c': hours_values,
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
 
