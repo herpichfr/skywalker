@@ -25,11 +25,14 @@ def parse_args():
                         help="Longitude of the observer in degrees. Default is CTIO.")
     parser.add_argument("--elev", type=float, required=False, default=2200,
                         help="Altitude of the observer in meters. Default is CTIO.")
-    parser.add_argument("--site", type=str, required=False, default=None,
+    parser.add_argument("--site", type=str, required=False,
                         help="Site name (e.g., 'CTIO').")
     parser.add_argument("--sitefile", "-sf", type=str, required=False,
                         help="File containing the coordinates of the site. \
                         Can be used as an alternative to lat, lon, and alt or site.")
+    parser.add_argument("--minalt", type=float, required=False, default=10,
+                        help="Minimum altitude the telescope can safely go \
+                        in degrees. Default is 10.")
 
     # night
     parser.add_argument("--nightstarts", "-ns", type=str, required=False,
@@ -58,19 +61,10 @@ def parse_args():
                         help="If file is provided and the column PID is present, \
                         only objects with the given PID will be plotted.")
     parser.add_argument("--blockinit", type=str, required=False,
-                        help="Initial time of the observation block in HH:MM:SS.")
+                        help="Initial time of the observation block in HH:MM:SS. \
+                        In case blockinit is provided, it replaces the parameter time.")
     parser.add_argument("--blocktime", type=float, required=False,
                         help="Size of the observation block in seconds.")
-
-    # observatory
-    parser.add_argument("--observatory", "-obs", type=str, required=False,
-                        help="Observatory name (e.g., 'CTIO'). Default is None.")
-    parser.add_argument("--observatoryfile", "-of", type=str, required=False,
-                        help="File containing the coordinates of the observatory. \
-                        Can be used as an alternative to observatory.")
-    parser.add_argument("--minalt", type=float, required=False, default=10,
-                        help="Minimum altitude the telescope can safely go \
-                        in degrees. Default is 30.")
 
     # plot
     parser.add_argument("--skychart", "-sc", action="store_true",
@@ -118,19 +112,17 @@ class Skywalker:
         self.lat = args.lat
         self.lon = args.lon
         self.elev = args.elev
-        self.minalt = args.minalt
         self.site = args.site
         self.sitefile = args.sitefile
         self.sitename = None
+        self.minalt = args.minalt
 
         self.nightstarts = args.nightstarts
         self.time = args.time if args.time else "23:59:59"
         self.inithour = None
         self.delta_midnight = None
-        self.frame_tonight = None
         self.frame_time_overnight = None
 
-        self.sun = None
         self.moon = None
         self.moon_brightness = None
         self.moonaltaz_time_overnight = None
@@ -149,18 +141,12 @@ class Skywalker:
         self.target = None
         self.target_list = pd.DataFrame()
 
-        self.observatory = args.observatory
-        self.observatoryfile = args.observatoryfile
-        self.minalt = args.minalt
-
         self.make_skychart = args.skychart
         self.savefig = args.savefig
         self.figname = args.figname
 
-        self.timezone = None
-        self.nighttime = None
         self.observer = None
-        self.utcoffset = None
+        self.utcoffset = -3 * u.hour
 
         self.logfile = args.logfile
         self.loglevel = args.loglevel
@@ -194,27 +180,27 @@ class Skywalker:
         self.observer = Observer(self.location)
 
     def set_time(self):
-        self.nighttime = Time(self.nightstarts + "T" +
-                              self.time, scale='utc', format='isot')
-        self.logger.info(f"Time set to {self.time}")
         if not self.time:
             self.inithour = "23:59:59"
         else:
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
+        self.obs_time = Time(self.nightstarts + "T" +
+                             self.inithour, scale='utc', format='isot') - self.utcoffset
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(
             lng=self.location.lon.value, lat=self.location.lat.value)
-        self.timezone = pytz.timezone(timezone_str)
-        dt = self.nighttime.datetime
-        self.utcoffset = (self.timezone.utcoffset(
-            dt).seconds / 3600 - 24) * u.hour
-        self.obs_time = Time(self.nightstarts + "T" +
-                             self.inithour, scale='utc', format='isot') - self.utcoffset
+        _timezone = pytz.timezone(timezone_str)
+        self.utcoffset = (_timezone.utcoffset(
+            self.obs_time.datetime).seconds / 3600 - 24) * u.hour
 
     def set_target(self, ra=None, dec=None):
         if self.object:
-            self.target = SkyCoord.from_name(self.object)
+            try:
+                self.target = SkyCoord.from_name(self.object)
+            except ValueError:
+                raise ValueError(
+                    f"Object '{self.object}' not found in the database.")
         elif ra and dec:
             self.target = SkyCoord(ra=self.ra,
                                    dec=self.dec,
@@ -229,44 +215,68 @@ class Skywalker:
             raise ValueError("No target specified.")
 
     def set_night_frames(self):
-        observer_time = self.nighttime - self.utcoffset
-        night_ends = (observer_time + .5 * u.day).strftime('%Y-%m-%d')
-        midnight = Time(f"{night_ends}T00:00:00",
-                        format='isot') - self.utcoffset
+        _night_ends = (self.obs_time + .5 * u.day).strftime('%Y-%m-%d')
+        _midnight = Time(f"{_night_ends}T00:00:00",
+                         format='isot') - self.utcoffset
         self.delta_midnight = np.linspace(-12, 12, 500) * u.hour
-        # self.frame_tonight = AltAz(obstime=observer_time + self.delta_midnight,
-        #                            location=self.location)
-        self.times_time_overnight = midnight + self.delta_midnight
-        self.frame_time_overnight = AltAz(obstime=self.times_time_overnight,
+        _times_time_overnight = _midnight + self.delta_midnight
+        self.frame_time_overnight = AltAz(obstime=_times_time_overnight,
                                           location=self.location)
-        self.sun = get_body('sun', self.obs_time, self.location)
+        _sun = get_body('sun', self.obs_time, self.location)
         self.moon = get_body('moon', self.obs_time, location=self.location)
         self.sunaltaz_time_overnight = get_body(
-            'sun', self.times_time_overnight).transform_to(self.frame_time_overnight)
+            'sun', _times_time_overnight).transform_to(self.frame_time_overnight)
         self.moonaltaz_time_overnight = get_body(
-            'moon', self.times_time_overnight).transform_to(self.frame_time_overnight)
-        elongation = self.sun.separation(self.moon)
-        moon_phase = np.arctan2(self.sun.distance * np.sin(elongation),
-                                self.moon.distance - self.sun.distance * np.cos(elongation))
+            'moon', _times_time_overnight).transform_to(self.frame_time_overnight)
+        elongation = _sun.separation(self.moon)
+        moon_phase = np.arctan2(_sun.distance * np.sin(elongation),
+                                self.moon.distance - _sun.distance * np.cos(elongation))
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
+
+    def check_blockinit_format(self):
+        if len(self.blockinit.split(':')) != 3:
+            _blockinit = self.blockinit.split(':')
+            if len(_blockinit) == 2:
+                self.blockinit = f"{_blockinit[0]}:{_blockinit[1]}:00"
+            elif len(_blockinit) == 1:
+                self.blockinit = f"{_blockinit[0]}:00:00"
 
     def set_target_list(self):
         if self.load_file:
             df = pd.read_csv(self.file)
             if self.pid:
-                df = df[df['PID'] == self.pid]
+                if 'PID' not in df.columns:
+                    self.logger.warning(
+                        f"PID column not found in {self.file}. \
+                        Using all targets.")
+                    self.pid = None
+                else:
+                    self.logger.info(
+                        f"PID column found in {self.file}. \
+                        Using only targets with PID {self.pid}.")
+                    df = df[df['PID'] == self.pid]
+            if 'RA' not in df.columns or 'DEC' not in df.columns:
+                raise ValueError(
+                    f"RA and DEC columns not found in {self.file}.")
+            if 'NAME' not in df.columns:
+                self.logger.warning(
+                    f"NAME column not found in {self.file}. \
+                    Using Obj incremented by 1 as names.")
+                df['NAME'] = ["Obj" + str(i) for i in range(1, len(df) + 1)]
+            if 'BLINIT' not in df.columns:
+                self.logger.warning(
+                    f"BLINIT column not found in {self.file}. \
+                    Using time parameter as BLINIT.")
+                df['BLINIT'] = [self.time] * len(df)
+            if 'BLOCKTIME' not in df.columns:
+                self.logger.warning(
+                    f"BLOCKTIME column not found in {self.file}. \
+                    Using 0 as BLOCKTIME.")
+                df['BLOCKTIME'] = [0] * len(df)
             self.target_list = df
         elif self.object:
-            try:
-                target = SkyCoord.from_name(self.object, frame='icrs')
-            except ValueError:
-                raise ValueError(
-                    f"Object '{self.object}' not found in the database.")
             if self.blockinit:
-                if len(self.blockinit.split(':')) != 3:
-                    # TODO: check if format is HH:MM:SS. Ajust it if not
-                    raise ValueError(
-                        "Block init time should be in the format HH:MM:SS")
+                self.check_blockinit_format()
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -279,14 +289,13 @@ class Skywalker:
             self.obj_nme = self.object
             self.target_list = pd.DataFrame(
                 {'NAME': [self.obj_nme],
-                 'RA': [target.ra.value],
-                 'DEC': [target.dec.value],
+                 'RA': [self.target.ra.value],
+                 'DEC': [self.target.dec.value],
                  'BLINIT': [blinit],
                  'BLOCKTIME': [blocktime.value]})
         elif self.ra and self.dec:
-            self.target = SkyCoord(ra=self.ra,
-                                   dec=self.dec, unit=(args.raunit, 'deg'))
             if self.blockinit:
+                self.check_blockinit_format()
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -340,23 +349,12 @@ class Skywalker:
         else:
             is_list = False
 
-        minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
-                                         0 * u.deg].min() - 1
-        maxx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
-                                         0 * u.deg].max() + 1
         for index in self.target_list.index:
             myObjdf = self.target_list.loc[index]
-            # objtime = Time(self.nightstarts + "T" + self.time,
-            #                format='isot') - self.utcoffset
             obj_coords = SkyCoord(ra=myObjdf['RA'],
                                   dec=myObjdf['DEC'],
                                   unit=(self.raunit, 'deg'))
 
-            # obj_dec_inihour = float(self.time.split(':')[0]) + \
-            #     float(self.time.split(':')[1]) / 60. + \
-            #     float(self.time.split(':')[2]) / 3600.
-            # if obj_dec_inihour > 12.:
-            #     obj_dec_inihour -= 24
             block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
                 float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
                 float(myObjdf['BLINIT'].split(':')[2]) / 3600.
@@ -368,16 +366,28 @@ class Skywalker:
 
             mask = myaltaz_overnight.alt > 0 * u.deg
             mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
+            if mask.sum() == 0:
+                self.logger.warning(
+                    f"Object {myObjdf['NAME']} is not observable at the given \
+                    time and observatory.")
+                continue
 
             init_observable = self.frame_time_overnight[mask].obstime.min(
             )
             end_observable = self.frame_time_overnight[mask].obstime.max(
             )
             observe_time = Time(np.arange(init_observable.jd,
-                                          end_observable.jd, 1/24), format='jd')
+                                          end_observable.jd, 1./24), format='jd')
 
             hours_values = np.array([obs_time.datetime.hour + self.utcoffset.value +
                                      obs_time.datetime.minute / 60. for obs_time in observe_time])
+
+            if myObjdf['BLOCKTIME'] > 0:
+                blocktime = float(myObjdf['BLOCKTIME']) * u.s
+                blocktime = blocktime.to(u.hour).value
+                block_ends = block_starts + blocktime
+            else:
+                print("Block time is 0")
 
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
@@ -385,21 +395,15 @@ class Skywalker:
                              label=myObjdf['NAME'],
                              zorder=11)
 
-                if block_starts is not None:
-                    if myObjdf['BLOCKTIME'] > 0:
-                        blocktime = float(myObjdf['BLOCKTIME']) * u.s
-                        blocktime = blocktime.to(u.hour).value
-                        block_ends = block_starts + blocktime
-                        ax1.fill_between(self.delta_midnight.to('hr').value,
-                                         np.zeros(
-                                             len(self.delta_midnight.value)),
-                                         myaltaz_overnight.alt.value,
-                                         (self.delta_midnight.value >= block_starts) & (
-                            self.delta_midnight.value <= block_ends),
-                            color=p[0].get_color(),
-                            zorder=11)
-                    else:
-                        print("Block time is 0")
+                if myObjdf['BLOCKTIME'] > 0:
+                    ax1.fill_between(self.delta_midnight.to('hr').value,
+                                     np.zeros(
+                        len(self.delta_midnight.value)),
+                        myaltaz_overnight.alt.value,
+                        (self.delta_midnight.value >= block_starts) & (
+                        self.delta_midnight.value <= block_ends),
+                        color=p[0].get_color(),
+                        zorder=11)
 
                 if self.make_skychart:
                     self.set_skychart(self.observer, obj_coords,
@@ -418,20 +422,15 @@ class Skywalker:
                                  lw=0, s=8, cmap='viridis',
                                  zorder=11)
                 plt.colorbar(sc, pad=0.1).set_label('Azimuth [deg]')
-                if block_starts is not None:
-                    if myObjdf['BLOCKTIME'] > 0:
-                        blocktime = float(myObjdf['BLOCKTIME']) * u.s
-                        blocktime = blocktime.to(u.hour).value
-                        block_ends = block_starts + blocktime
-                        ax1.fill_between(self.delta_midnight.to('hr').value,
-                                         np.zeros(
-                                             len(self.delta_midnight.value)),
-                                         myaltaz_overnight.alt.value,
-                                         (self.delta_midnight.value >= block_starts) & (
-                            self.delta_midnight.value <= block_ends),
-                            color='orange', zorder=11)
-                    else:
-                        print("Block time is 0")
+
+                if myObjdf['BLOCKTIME'] > 0:
+                    ax1.fill_between(self.delta_midnight.to('hr').value,
+                                     np.zeros(
+                        len(self.delta_midnight.value)),
+                        myaltaz_overnight.alt.value,
+                        (self.delta_midnight.value >= block_starts) & (
+                        self.delta_midnight.value <= block_ends),
+                        color='orange', zorder=11)
 
                 if self.make_skychart:
                     self.set_skychart(self.observer, obj_coords,
@@ -513,6 +512,10 @@ class Skywalker:
                                 color="black", alpha=1.1 - self.moon_brightness.value, zorder=0)
             ax3.add_artist(circle)
 
+        minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].min() - 1
+        maxx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
+                                         0 * u.deg].max() + 1
         if self.minalt > 1:
             ax1.plot([minx, maxx],
                      [self.minalt, self.minalt], '--', c='r')
