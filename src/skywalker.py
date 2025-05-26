@@ -479,28 +479,33 @@ class Skywalker:
                          (self.moonaltaz_time_overnight.alt > 0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt < -18 * u.deg),
                          color='midnightblue',
-                         alpha=1.1 - self.moon_brightness.value,
+                         alpha=1. - self.moon_brightness.value,
                          zorder=2)
 
         if self.make_skychart:
             # plot the moon into skychart
             mask = self.sunaltaz_time_overnight.alt < 0 * u.deg
             mask &= self.moonaltaz_time_overnight.alt > 0 * u.deg
-            init_moon_time = self.moonaltaz_time_overnight.obstime[mask].min()
-            end_moon_time = self.moonaltaz_time_overnight.obstime[mask].max()
+            if mask.sum() > 0:
+                init_moon_time = self.moonaltaz_time_overnight.obstime[mask].min(
+                )
+                end_moon_time = self.moonaltaz_time_overnight.obstime[mask].max(
+                )
+                moon_time = Time(np.arange(init_moon_time.jd,
+                                           end_moon_time.jd, 1/24), format='jd')
+                moon_hours = np.array([obs_time.datetime.hour + self.utcoffset.value +
+                                       obs_time.datetime.minute / 60. for obs_time in moon_time])
 
-            moon_time = Time(np.arange(init_moon_time.jd,
-                                       end_moon_time.jd, 1/24), format='jd')
-            moon_hours = np.array([obs_time.datetime.hour + self.utcoffset.value +
-                                   obs_time.datetime.minute / 60. for obs_time in moon_time])
-
-            self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
-                                                      dec=self.moon.dec),
-                              moon_time.isot, ax3,
-                              obj_style={'color': 'c',
-                                         'marker': 'o',
-                                         'label': 'Moon: %i' % (self.moon_brightness.value * 100)},
-                              hours_value=moon_hours)
+                self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
+                                                          dec=self.moon.dec),
+                                  moon_time.isot, ax3,
+                                  obj_style={'color': 'c',
+                                             'marker': 'o',
+                                             'label': 'Moon: %i' % (self.moon_brightness.value * 100)},
+                                  hours_value=moon_hours)
+            else:
+                self.logger.warning(
+                    "Moon is not observable at the given time and observatory.")
 
             circle = plt.Circle((0., 0.), 90, transform=ax3.transData._b,
                                 color="red", alpha=0.7, zorder=0)
@@ -509,7 +514,7 @@ class Skywalker:
                                 color="white", alpha=1., zorder=0)
             ax3.add_artist(circle)
             circle = plt.Circle((0., 0.), 90 - self.minalt, transform=ax3.transData._b,
-                                color="black", alpha=1.1 - self.moon_brightness.value, zorder=0)
+                                color="black", alpha=1. - self.moon_brightness.value, zorder=0)
             ax3.add_artist(circle)
 
         minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
