@@ -201,7 +201,7 @@ class Skywalker:
             except ValueError:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
-        elif ra and dec:
+        elif (ra is not None) and (dec is not None):
             self.target = SkyCoord(ra=self.ra,
                                    dec=self.dec,
                                    unit=(self.raunit, 'deg'))
@@ -548,8 +548,9 @@ class Skywalker:
         ax2.set_yticklabels(myticks)
         ax2.set_ylim(0, 90)
 
-        ax3.legend(loc='lower right', fontsize=8,
-                   bbox_to_anchor=(1., -0.1))
+        if self.make_skychart:
+            ax3.legend(loc='lower right', fontsize=8,
+                       bbox_to_anchor=(1., -0.1))
 
         plt.tight_layout()
 
@@ -572,7 +573,7 @@ class Skywalker:
         self.set_location()
         self.set_observer()
         self.set_time()
-        self.set_target()
+        self.set_target(ra=self.ra, dec=self.dec)
         self.set_night_frames()
         self.set_target_list()
         self.set_plot()
