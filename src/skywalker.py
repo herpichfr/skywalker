@@ -435,7 +435,7 @@ class Skywalker:
                 if self.make_skychart:
                     self.set_skychart(self.observer, obj_coords,
                                       observe_time, ax3,
-                                      obj_style={'cmap': 'viridis',
+                                      obj_style={'cmap': 'viridis_r',
                                                  'marker': '*',
                                                  'c': hours_values,
                                                  'label': myObjdf['NAME']},
