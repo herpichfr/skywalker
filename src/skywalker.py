@@ -45,9 +45,10 @@ def parse_args():
     # object
     parser.add_argument("--object", "-o", type=str, required=False,
                         help="Object to plot (e.g., 'M31'). Default is None.")
-    parser.add_argument("--ra", type=float, required=False,
-                        help="Right Ascension of the object in degrees or hourangle.")
-    parser.add_argument("--dec", type=float, required=False,
+    parser.add_argument("--ra", required=False,
+                        help="Right Ascension of the object in degrees or \
+                        hourangle. If using hourangle, set --raunit to 'hour'.")
+    parser.add_argument("--dec", required=False,
                         help="Declination of the object in degrees.")
     parser.add_argument("--raunit", type=str, default='deg',
                         help="Units of the RA parameter. Options: [hour, deg]. \
@@ -293,7 +294,7 @@ class Skywalker:
                  'DEC': [self.target.dec.value],
                  'BLINIT': [blinit],
                  'BLOCKTIME': [blocktime.value]})
-        elif self.ra and self.dec:
+        elif (self.ra is not None) and (self.dec is not None):
             if self.blockinit:
                 self.check_blockinit_format()
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
@@ -353,7 +354,7 @@ class Skywalker:
             myObjdf = self.target_list.loc[index]
             obj_coords = SkyCoord(ra=myObjdf['RA'],
                                   dec=myObjdf['DEC'],
-                                  unit=(self.raunit, 'deg'))
+                                  unit=('deg', 'deg'))
 
             block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
                 float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
@@ -392,7 +393,7 @@ class Skywalker:
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
                              myaltaz_overnight.alt.value,
-                             label=myObjdf['NAME'],
+                             label=f"{myObjdf['NAME']}",
                              zorder=11)
 
                 if myObjdf['BLOCKTIME'] > 0:
@@ -465,7 +466,8 @@ class Skywalker:
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
                  color='c', ls='--',
-                 label='Moon: %i' % (self.moon_brightness.value * 100),
+                 label='Moon: %i%%' % (
+                     self.moon_brightness.value * 100),
                  zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
@@ -501,7 +503,7 @@ class Skywalker:
                                   moon_time.isot, ax3,
                                   obj_style={'color': 'c',
                                              'marker': 'o',
-                                             'label': 'Moon: %i' % (self.moon_brightness.value * 100)},
+                                             'label': 'Moon: %i%%' % (self.moon_brightness.value * 100)},
                                   hours_value=moon_hours)
             else:
                 self.logger.warning(
