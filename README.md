@@ -1,6 +1,7 @@
 SkyWalker - Python observation planner tool
 ===========================================
 
+[![Version](https://img.shields.io/github/v/release/herpichfr/skywalker)](https://img.shields.io/github/v/release/herpichfr/skywalker)
 ![GitHub issues](https://img.shields.io/github/issues/herpichfr/skywalker)
 [![License](https://img.shields.io/badge/license-GNUv3.0-green)](LICENSE)
 [![Python 3](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/)
