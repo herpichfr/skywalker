@@ -58,10 +58,11 @@ function check_basic_requirements() {
 
 function install_dependencies() {
     echo "Installing dependencies..."
+    PATH_TO_THIS_SCRIPT=$(dirname "$(readlink -f "$0")")
     # Create a virtual environment
-    python3 -m venv venv
+    python3 -m venv "$PATH_TO_THIS_SCRIPT/venv"
     # Activate the virtual environment
-    . "venv/bin/activate"
+    . "$PATH_TO_THIS_SCRIPT/venv/bin/activate"
     # Install required packages
     if [ -f requirements.txt ]; then
         pip install -r requirements.txt
@@ -70,31 +71,18 @@ function install_dependencies() {
         exit 1
     fi
     # install astroplan from github
-    CURRENT_PATH=$(pwd)
-    git clone https://github.com/herpichfr/astroplan.git "$CURRENT_PATH/astroplan"
-    cd "$CURRENT_PATH/astroplan" || exit 1
+    git clone https://github.com/herpichfr/astroplan.git "$PATH_TO_THIS_SCRIPT/astroplan"
+    cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
     python3 setup.py install
-    cd "$CURRENT_PATH" || exit 1
+    cd "$PATH_TO_THIS_SCRIPT" || exit 1
 
     echo "Dependencies installed successfully."
 }
 
 function uninstall_dependencies() {
-    echo "Uninstalling dependencies..."
-    # Deactivate the virtual environment if it is active
-    if [[ "$VIRTUAL_ENV" != "" ]]; then
-        command -v deactivate
-    fi
-    # find path to this script
-    SCRIPT_PATH=$(realpath "$0")
-
-    # Remove the virtual environment directory
-    if [ -d "$SCRIPT_PATH/venv" ]; then
-        rm -rf "$SCRIPT_PATH/venv"
-        echo "Virtual environment removed."
-    else
-        echo "No virtual environment found to remove."
-    fi
+    PATH_TO_THIS_SCRIPT=$(dirname "$(readlink -f "$0")")
+    echo "To uninstall venv, run the following command from within the directory you :"
+    echo "deactivate && rm -rf $PATH_TO_THIS_SCRIPT/venv"
 }
 
 case "$1" in
