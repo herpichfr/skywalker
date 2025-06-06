@@ -70,11 +70,19 @@ function install_dependencies() {
         echo "requirements.txt not found. Please provide a valid requirements file."
         exit 1
     fi
-    # install astroplan from github
-    git clone https://github.com/herpichfr/astroplan.git "$PATH_TO_THIS_SCRIPT/astroplan"
-    cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
-    python3 setup.py install
-    cd "$PATH_TO_THIS_SCRIPT" || exit 1
+    # check if astroplan exists or install astroplan from github
+    if [ -d "$PATH_TO_THIS_SCRIPT/astroplan" ]; then
+        echo "astroplan already exists. Getting the latest updates."
+        cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
+        git pull
+        cd "$PATH_TO_THIS_SCRIPT" || exit 1
+    else
+        echo "astroplan not found. Cloning from GitHub."
+        git clone https://github.com/herpichfr/astroplan.git "$PATH_TO_THIS_SCRIPT/astroplan"
+        cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
+        python3 setup.py install
+        cd "$PATH_TO_THIS_SCRIPT" || exit 1
+    fi
 
     echo "Dependencies installed successfully."
     echo "You now need to activate the virtual environment with the following command:"
