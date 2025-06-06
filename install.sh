@@ -61,7 +61,7 @@ function install_dependencies() {
     # Create a virtual environment
     python3 -m venv venv
     # Activate the virtual environment
-    source venv/bin/activate
+    . "venv/bin/activate"
     # Install required packages
     if [ -f requirements.txt ]; then
         pip install -r requirements.txt
@@ -83,7 +83,7 @@ function uninstall_dependencies() {
     echo "Uninstalling dependencies..."
     # Deactivate the virtual environment if it is active
     if [[ "$VIRTUAL_ENV" != "" ]]; then
-        deactivate
+        command -v deactivate
     fi
     # find path to this script
     SCRIPT_PATH=$(realpath "$0")
