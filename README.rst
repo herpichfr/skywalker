@@ -1,7 +1,7 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
-|version| |license|
+|version| [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/)
 
 By Herpich F. R.  
 

@@ -1,0 +1,22 @@
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-version-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - run: npm install
+      - name: Update Version Badge
+        uses: schneegans/dynamic-badges-action@v1.0.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 12345abcde
+          filename: version.json
+          label: Version 
+          message: ${{ github.ref }}
+          color: blue
