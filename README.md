@@ -95,7 +95,7 @@ Usage examples
 ![Example 6](figs/test06_2019-08-23_plan.png)
 
 Last modifications
-++++++++
+------------------
 
 * 2020-03-12: Upgrading for Python 3 - Files modificated: skywalker.py and myastroplan/sky.py
 * 2025-05-21: Full refactoring of skywalker.py. Removing myastroplan in favour of a locally modified fork of astroplan. The modified version can be found in (https://github.com/herpichfr/astroplan).
