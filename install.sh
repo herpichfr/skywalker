@@ -71,7 +71,7 @@ function install_dependencies() {
     fi
     # install astroplan from github
     CURRENT_PATH=$(pwd)
-    git clone git@github.com:herpichfr/astroplan.git "$CURRENT_PATH/astroplan"
+    git clone https://github.com/herpichfr/astroplan.git "$CURRENT_PATH/astroplan"
     cd "$CURRENT_PATH/astroplan" || exit 1
     python3 setup.py install
     cd "$CURRENT_PATH" || exit 1
