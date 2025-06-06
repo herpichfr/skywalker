@@ -1,6 +1,8 @@
 SkyWalker - Python observation planner tool
 -------------------------------------------
 
+|version| |license|
+
 By Herpich F. R.  
 
 This tool can be used to plan the nights for virtually any observatory on the Planet. The user can make maps for individual objects or lists containing several of them. It is also possible to define time blocks for every object (individual or in a list). The angular distance to the Moon will always be shown at the given initial time for each object (if none is given, the default is 0 LT).
@@ -28,7 +30,28 @@ Requisites
 
 This code uses a modified version of the Astroplan code (https://astroplan.readthedocs.io/en/latest/). If you use this code in your research, please cite accordingly (see https://github.com/astropy/astroplan for the full reference provided by the authors).
 
-Examples
+Installation
+++++++++++++
+
+The package was only tested on Python 3.6 and above on Linux systyems.
+
+To check for dependencies, run:
+
+``bash install.sh --check``
+
+This will check if all the required packages are installed. If any of them is missing, it will print a message with the name of the package and how to install it.
+
+To install the required packages and dependencies, run (do not run the command with sudo):
+
+``bash install.sh --install``
+
+This will create a python virtual environment and install all the required packages in it, activating it if the install is successful. 
+
+To uninstall the package, run:
+
+``bash install.sh --uninstall``
+
+Usage examples
 ++++++++
 
 * Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 0:30 LT
