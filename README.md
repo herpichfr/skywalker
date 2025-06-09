@@ -37,7 +37,15 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Installation
 ------------
 
-The package was only tested on Python 3.6 and above on Linux systyems.
+The package was only tested on Python 3.6 and above on Linux systems. There is no plans to make it work on Windows or MacOS.
+
+The following method is preferable for now, but fill free to install it in any other way you prefer.
+
+Clone the repository:
+
+``git clone https://github.com/herpichfr/skywalker.git``
+
+Into the repository, run the following instructions.
 
 To check for dependencies, run:
 
@@ -60,19 +68,19 @@ Usage examples
 
 * Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 0:30 LT
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --savefig test01``
+``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --savefig test01``
 
 ![Example 1](figs/test01_2019-08-23_plan.png)
 
 * Showing the skychart for the same track
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --skychart --savefig test02``
+``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --skychart --savefig test02``
 
 ![Example 2](figs/test02_2019-08-23_plan.png)
    
 * Adding an observing block starting at 0:30 LT for NGC104 at Cerro Tololo
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --at 0:30:00 --blocktime 3851 --skychart --savefig test03``
+``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --blocktime 3851 --skychart --savefig test03``
 
 ![Example 3](figs/test03_2019-08-23_plan.png)
 
