@@ -203,8 +203,24 @@ class Skywalker:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
         elif (ra is not None) and (dec is not None):
-            self.target = SkyCoord(ra=self.ra,
-                                   dec=self.dec,
+            if self.raunit == 'hour':
+                if (":" in ra) and (len(ra.split(':')) < 3):
+                    _lenra = len(ra.split(':'))
+                    while _lenra < 3:
+                        ra += ":00"
+                        _lenra = len(ra.split(':'))
+            else:
+                try:
+                    ra = float(ra)
+                except ValueError:
+                    raise ValueError(
+                        f"RA '{ra}' is not a valid float or hour format.")
+                _ra = f"{int(ra)}"
+                _ra += f":{int((ra - int(ra)) * 60)}"
+                _ra += ":00"
+                ra = _ra
+            self.target = SkyCoord(ra=ra,
+                                   dec=dec,
                                    unit=(self.raunit, 'deg'))
         elif self.file:
             if not os.path.isfile(self.file):
@@ -329,12 +345,19 @@ class Skywalker:
                      hours_value=None
                      ):
 
-        plot_sky(obj_coords,
-                 observer,
-                 observe_time,
-                 ax=ax,
-                 style_kwargs=obj_style,
-                 hours_value=hours_value)
+        try:
+            plot_sky(obj_coords,
+                     observer,
+                     observe_time,
+                     ax=ax,
+                     style_kwargs=obj_style,
+                     hours_value=hours_value)
+        except TypeError as e:
+            self.logger.error(f"Error plotting skychart: {e}")
+            self.logger.error(
+                "The TypeError may be due to an incompatible version of astroplan.")
+            raise TypeError("Please ensure you have the modified astroplan version installed. \
+                            You can get the latest version from https://github.com/herpichfr/astroplan")
 
     def set_plot(self):
         if self.make_skychart:
@@ -444,8 +467,8 @@ class Skywalker:
 
             # add distance to the moon at the time of the observation
             moon_distance = self.moon.separation(obj_coords).value
-            text_position = abs(self.delta_midnight.value - block_starts) == \
-                abs(self.delta_midnight.value - block_starts).min()
+            text_position = abs(self.delta_midnight.value - block_starts) == abs(
+                self.delta_midnight.value - block_starts).min()
             if myaltaz_overnight.alt.value[text_position].size == 0:
                 self.logger.warning(
                     f"Could not find altitude for {myObjdf['NAME']} at {block_starts}")
