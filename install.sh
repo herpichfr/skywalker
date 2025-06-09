@@ -85,10 +85,14 @@ function install_dependencies() {
     fi
 
     echo "Dependencies installed successfully."
-    echo "You now need to activate the virtual environment with the following command:"
+    echo ""
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    DEFAULT='\033[0m'
+    echo -e "${RED} IMPORTANT: You now need to activate the virtual environment with the following command before running the program:${DEFAULT}"
     echo "source $PATH_TO_THIS_SCRIPT/venv/bin/activate"
-    echo "\n"
-    echo "Now you can run the script to test it (you can use an object of your choice):"
+    echo ""
+    echo -e "${GREEN} Now you can run the script to test it (you can use an object of your choice):${DEFAULT}"
     echo "python3 $PATH_TO_THIS_SCRIPT/src/skywalker.py --object sirius"
 }
 
