@@ -181,9 +181,23 @@ class Skywalker:
         self.observer = Observer(self.location)
 
     def set_time(self):
-        if not self.time:
+        if self.time is None:
             self.inithour = "23:59:59"
         else:
+            if len(self.time.split(':')) != 3:
+                try:
+                    _time = float(self.time)
+                    _time_is_str = False
+                except ValueError:
+                    _time_is_str = True
+                if _time_is_str:
+                    while len(self.time.split(':')) < 3:
+                        self.time += ":00"
+                else:
+                    _time = f"{int(_time)}"
+                    _time += f":{int((_time - int(_time)) * 60)}"
+                    _time += ":00"
+                    self.time = _time
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
         self.obs_time = Time(self.nightstarts + "T" +
@@ -290,6 +304,11 @@ class Skywalker:
                     f"BLOCKTIME column not found in {self.file}. \
                     Using 0 as BLOCKTIME.")
                 df['BLOCKTIME'] = [0] * len(df)
+            _coords = SkyCoord(ra=df['RA'],
+                               dec=df['DEC'],
+                               unit=(self.raunit, 'deg'))
+            df['RA'] = _coords.ra.value
+            df['DEC'] = _coords.dec.value
             self.target_list = df
         elif self.object:
             if self.blockinit:
