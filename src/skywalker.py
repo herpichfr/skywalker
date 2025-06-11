@@ -110,7 +110,14 @@ def logger(logfile=None, loglevel=logging.INFO):
 
 
 class Skywalker:
+    """
+    Skywalker class to visualize the sky at a given location and time.
+    It can plot the Moon, Sun, and a target object, and save the figure.
+    """
+
     def __init__(self, args):
+        """Initialize the Skywalker class with the given arguments."""
+
         self.location = None
         self.lat = args.lat
         self.lon = args.lon
@@ -156,6 +163,7 @@ class Skywalker:
         self.logger = logger(self.logfile, self.loglevel)
 
     def set_location(self):
+        """Set the location of the observer based on the provided parameters."""
         if self.sitefile is not None:
             if not os.path.isfile(self.sitefile):
                 raise ValueError(f"File {self.sitefile} not found.")
@@ -180,9 +188,11 @@ class Skywalker:
         self.logger.info(f"Location set to {self.location}")
 
     def set_observer(self):
+        """Set the observer based on the location."""
         self.observer = Observer(self.location)
 
     def set_time(self):
+        """Set the time of the observation."""
         if self.time is None:
             self.inithour = "23:59:59"
         else:
@@ -212,6 +222,19 @@ class Skywalker:
             self.obs_time.datetime).seconds / 3600 - 24) * u.hour
 
     def set_target(self, ra=None, dec=None):
+        """Set the target object based on the provided parameters.
+        If an object name is provided, it will try to resolve it to coordinates.
+        If RA and DEC are provided, it will create a SkyCoord object.
+        If a file is provided, it will load the coordinates from the file.
+
+        Parameters:
+        -----------
+        ra : str or float, optional
+            Right Ascension of the object in degrees or hourangle.
+            If using hourangle, set --raunit to 'hour'.
+        dec : str or float, optional
+            Declination of the object in degrees.
+        """
         if self.object:
             try:
                 self.target = SkyCoord.from_name(self.object)
@@ -248,6 +271,7 @@ class Skywalker:
             raise ValueError("No target specified.")
 
     def set_night_frames(self):
+        """Set the frames for the night observation."""
         _night_ends = (self.obs_time + .5 * u.day).strftime('%Y-%m-%d')
         _midnight = Time(f"{_night_ends}T00:00:00",
                          format='isot') - self.utcoffset
@@ -267,6 +291,7 @@ class Skywalker:
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
 
     def check_blockinit_format(self, blockinit=np.array([0])):
+        """Check the format of the blockinit parameter and convert it to HH:MM:SS format."""
         _blockinit = blockinit.copy()
         for i, binit in enumerate(blockinit):
             try:
@@ -288,6 +313,7 @@ class Skywalker:
             return _blockinit
 
     def set_target_list(self):
+        """Set the target list based on the provided parameters."""
         if self.load_file:
             df = pd.read_csv(self.file)
             if self.pid:
@@ -377,13 +403,32 @@ class Skywalker:
                 "No target specified. Please provide a target name or coordinates.")
 
     def set_skychart(self,
-                     observer,
-                     obj_coords,
-                     observe_time,
-                     ax,
-                     obj_style={'color': 'b'},
-                     hours_value=None
+                     observer: Observer,
+                     obj_coords: SkyCoord,
+                     observe_time: Time,
+                     ax: plt.Axes,
+                     obj_style: dict = {'color': 'b'},
+                     hours_value: np.ndarray = None
                      ):
+        """Set the skychart for the given object coordinates and observation time.
+
+        Parameters:
+        -----------
+        observer : Observer
+            The observer object containing the location and time information.
+        obj_coords : SkyCoord
+            The coordinates of the object to plot.
+        observe_time : Time
+            The time of the observation.
+        ax : matplotlib.axes.Axes
+            The axes on which to plot the skychart.
+        obj_style : dict, optional
+            Style parameters for the object plot, such as color and marker.
+            Default is {'color': 'b'}.
+        hours_value : np.ndarray, optional
+            Array of hour values corresponding to the observation time.
+            If not provided, it will be calculated from the observe_time.
+        """
 
         try:
             plot_sky(obj_coords,
@@ -400,13 +445,13 @@ class Skywalker:
                             You can get the latest version from https://github.com/herpichfr/astroplan")
 
     def set_plot(self):
+        """Set the plot for the night observation."""
         if self.make_skychart:
             fig = plt.figure(figsize=(16, 6))
             ax1 = fig.add_subplot(121)
             ax3 = fig.add_subplot(122, projection='polar')
         else:
             fig, ax1 = plt.subplots(figsize=(8, 6))
-        plt.grid()
 
         if self.target_list.index.size > 1:
             is_list = True
@@ -441,10 +486,12 @@ class Skywalker:
             end_observable = self.frame_time_overnight[mask].obstime.max(
             )
             observe_time = Time(np.arange(init_observable.jd,
-                                          end_observable.jd, 1./24), format='jd')
+                                          end_observable.jd, 1./24),
+                                format='jd')
 
-            hours_values = np.array([obs_time.datetime.hour + self.utcoffset.value +
-                                     obs_time.datetime.minute / 60. for obs_time in observe_time])
+            hours_values = np.array([obs_time.datetime.hour +
+                                     obs_time.datetime.minute / 60.
+                                     for obs_time in observe_time + self.utcoffset])
 
             if myObjdf['BLOCKTIME'] > 0:
                 blocktime = float(myObjdf['BLOCKTIME']) * u.s
@@ -557,9 +604,10 @@ class Skywalker:
                 end_moon_time = self.moonaltaz_time_overnight.obstime[mask].max(
                 )
                 moon_time = Time(np.arange(init_moon_time.jd,
-                                           end_moon_time.jd, 1/24), format='jd')
-                moon_hours = np.array([obs_time.datetime.hour + self.utcoffset.value +
-                                       obs_time.datetime.minute / 60. for obs_time in moon_time])
+                                           end_moon_time.jd, 1/24),
+                                 format='jd')
+                moon_hours = np.array([obs_time.datetime.hour +
+                                       obs_time.datetime.minute / 60. for obs_time in moon_time + self.utcoffset])
 
                 self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
                                                           dec=self.moon.dec),
@@ -617,6 +665,7 @@ class Skywalker:
             ax3.legend(loc='lower right', fontsize=8,
                        bbox_to_anchor=(1., -0.1))
 
+        plt.grid()
         plt.tight_layout()
 
         if self.savefig:
