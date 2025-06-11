@@ -33,6 +33,8 @@ def parse_args():
     parser.add_argument("--minalt", type=float, required=False, default=10,
                         help="Minimum altitude the telescope can safely go \
                         in degrees. Default is 10.")
+    parser.add_argument("--sites", action="store_true",
+                        help="List all available sites in the database.")
 
     # night
     parser.add_argument("--nightstarts", "-ns", type=str, required=False,
@@ -194,8 +196,8 @@ class Skywalker:
                     while len(self.time.split(':')) < 3:
                         self.time += ":00"
                 else:
-                    _time = f"{int(_time)}"
-                    _time += f":{int((_time - int(_time)) * 60)}"
+                    _time = f"{int(self.time)}"
+                    _time += f":{int((float(self.time) - int(self.time)) * 60)}"
                     _time += ":00"
                     self.time = _time
             self.inithour = Time(self.nightstarts + "T" + self.time,
@@ -264,13 +266,26 @@ class Skywalker:
                                 self.moon.distance - _sun.distance * np.cos(elongation))
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
 
-    def check_blockinit_format(self):
-        if len(self.blockinit.split(':')) != 3:
-            _blockinit = self.blockinit.split(':')
-            if len(_blockinit) == 2:
-                self.blockinit = f"{_blockinit[0]}:{_blockinit[1]}:00"
-            elif len(_blockinit) == 1:
-                self.blockinit = f"{_blockinit[0]}:00:00"
+    def check_blockinit_format(self, blockinit=np.array([0])):
+        _blockinit = blockinit.copy()
+        for i, binit in enumerate(blockinit):
+            try:
+                _blinit = float(binit)
+                _blinit_is_str = False
+            except ValueError:
+                _blinit_is_str = True
+
+            if _blinit_is_str:
+                while len(binit.split(':')) < 3:
+                    binit += ":00"
+            else:
+                _blinit = f"{int(binit)}"
+                _blinit += f":{int((float(binit) - int(binit)) * 60)}"
+                _blinit += ":00"
+                binit = _blinit
+            _blockinit[i] = binit
+
+            return _blockinit
 
     def set_target_list(self):
         if self.load_file:
@@ -299,6 +314,10 @@ class Skywalker:
                     f"BLINIT column not found in {self.file}. \
                     Using time parameter as BLINIT.")
                 df['BLINIT'] = [self.time] * len(df)
+            else:
+                df['BLINIT'] = self.check_blockinit_format(df['BLINIT'])
+                df['BLINIT'] = df['BLINIT'].apply(
+                    lambda x: Time(self.nightstarts + "T" + x, format='isot').strftime('%H:%M:%S'))
             if 'BLOCKTIME' not in df.columns:
                 self.logger.warning(
                     f"BLOCKTIME column not found in {self.file}. \
@@ -312,7 +331,8 @@ class Skywalker:
             self.target_list = df
         elif self.object:
             if self.blockinit:
-                self.check_blockinit_format()
+                self.blockinit = self.check_blockinit_format(
+                    np.array([self.blockinit]))
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -331,7 +351,8 @@ class Skywalker:
                  'BLOCKTIME': [blocktime.value]})
         elif (self.ra is not None) and (self.dec is not None):
             if self.blockinit:
-                self.check_blockinit_format()
+                self.blockinit = self.check_blockinit_format(
+                    np.array([self.blockinit]))
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -625,5 +646,10 @@ class Skywalker:
 
 if __name__ == "__main__":
     args = parse_args()
-    Luke = Skywalker(args)
-    Luke.main()
+    if args.sites:
+        print("Available sites:")
+        for site in EarthLocation.get_site_names():
+            print(site)
+    else:
+        Luke = Skywalker(args)
+        Luke.main()
