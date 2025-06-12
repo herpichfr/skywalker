@@ -50,7 +50,7 @@ def parse_args():
     parser.add_argument("--ra", required=False,
                         help="Right Ascension of the object in degrees or \
                         hourangle. If using hourangle, set --raunit to 'hour'.")
-    parser.add_argument("--dec", required=False,
+    parser.add_argument("--dec", required=False, type=str,
                         help="Declination of the object in degrees.")
     parser.add_argument("--raunit", type=str, default='deg',
                         help="Units of the RA parameter. Options: [hour, deg]. \
@@ -86,7 +86,25 @@ def parse_args():
                         help="Log level. Options: [DEBUG, INFO, WARNING, ERROR, CRITICAL]. \
                         Default is INFO.")
 
-    return parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except:
+        import sys
+        e = sys.exc_info()
+        parser.error(f"Argument error: {e}. \
+            If using hexagesimal DEC, use --dec='DD:MM:SS' to pass the argument.")
+    if args.raunit not in ['deg', 'hour']:
+        parser.error("Invalid value for --raunit. Options are: [deg, hour].")
+    if args.raunit == 'hour' and args.ra is None:
+        parser.error(
+            "If --raunit is 'hour', you must provide a value for --ra.")
+    if args.raunit == 'deg' and args.ra is not None:
+        try:
+            float(args.ra)
+        except ValueError:
+            parser.error(
+                "If --raunit is 'deg', --ra must be a valid float value.")
+    return args
 
 
 def logger(logfile=None, loglevel=logging.INFO):
