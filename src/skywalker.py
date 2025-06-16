@@ -101,9 +101,6 @@ def parse_args():
     args = parser.parse_args()
     if args.raunit not in ['deg', 'hour']:
         parser.error("Invalid value for --raunit. Options are: [deg, hour].")
-    if args.raunit == 'hour' and args.ra is None:
-        parser.error(
-            "If --raunit is 'hour', you must provide a value for --ra.")
     if args.raunit == 'deg' and args.ra is not None:
         try:
             float(args.ra)
