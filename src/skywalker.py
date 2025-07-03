@@ -589,10 +589,16 @@ class Skywalker:
             else:
                 altitude_position = myaltaz_overnight.alt.value[text_position]
 
+            moon_is_up = self.delta_midnight[self.moonaltaz_time_overnight.alt.value > 0].value
+            if (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
+                text_colour = 'magenta'
+            else:
+                text_colour = 'c'
+
             ax1.text(block_starts - 0.3,
                      altitude_position - 3,
                      "%i" % moon_distance,
-                     fontsize=10, color='pink', zorder=12)
+                     fontsize=10, color=text_colour, zorder=12)
 
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
