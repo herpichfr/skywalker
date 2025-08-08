@@ -609,8 +609,16 @@ class Skywalker:
                  zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
+                          u.deg) & (self.sunaltaz_time_overnight.alt > -6.3 * u.deg),
+                         color='indigo', zorder=0, alpha=0.8)
+        ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
+                         (self.sunaltaz_time_overnight.alt < -6 *
+                          u.deg) & (self.sunaltaz_time_overnight.alt > -12.3 * u.deg),
+                         color='indigo', zorder=1, alpha=0.9)
+        ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
+                         (self.sunaltaz_time_overnight.alt < -12 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -18 * u.deg),
-                         color='indigo', zorder=0)
+                         color='indigo', zorder=2, alpha=1)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.moonaltaz_time_overnight.alt < 0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt < -18 * u.deg),
