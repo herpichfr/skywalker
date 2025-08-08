@@ -177,7 +177,7 @@ class Skywalker:
         self.figname = args.figname
 
         self.observer = None
-        self.utcoffset = -3 * u.hour
+        self.utcoffset = 0 * u.hour
 
         self.logfile = args.logfile
         self.loglevel = args.loglevel
@@ -233,14 +233,14 @@ class Skywalker:
                     self.time = _time
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
-        self.obs_time = Time(self.nightstarts + "T" +
-                             self.inithour, scale='utc', format='isot') - self.utcoffset
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(
             lng=self.location.lon.value, lat=self.location.lat.value)
         _timezone = pytz.timezone(timezone_str)
-        self.utcoffset = (_timezone.utcoffset(
-            self.obs_time.datetime).seconds / 3600 - 24) * u.hour
+        self.utcoffset = (_timezone.utcoffset(Time(self.nightstarts + "T" +
+                          self.inithour, format='isot').datetime).seconds / 3600 - 24) * u.hour
+        self.obs_time = Time(self.nightstarts + "T" +
+                             self.inithour, scale='utc', format='isot') - self.utcoffset
 
     def set_target(self, ra=None, dec=None):
         """Set the target object based on the provided parameters.
@@ -573,6 +573,7 @@ class Skywalker:
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
 
+            ax1.grid()
             # add distance to the moon at the time of the observation
             moon_distance = self.moon.separation(obj_coords).value
             text_position = abs(self.delta_midnight.value - block_starts) == abs(
@@ -692,7 +693,6 @@ class Skywalker:
             ax3.legend(loc='lower right', fontsize=8,
                        bbox_to_anchor=(1., -0.1))
 
-        plt.grid()
         plt.tight_layout()
 
         if self.savefig:
