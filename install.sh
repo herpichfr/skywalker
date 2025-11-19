@@ -61,27 +61,16 @@ function install_dependencies() {
     PATH_TO_THIS_SCRIPT=$(dirname "$(readlink -f "$0")")
     # Create a virtual environment
     python3 -m venv "$PATH_TO_THIS_SCRIPT/venv"
+    # Deactivate any existing virtual environment
+    deactivate 2>/dev/null || true
     # Activate the virtual environment
-    . "$PATH_TO_THIS_SCRIPT/venv/bin/activate"
+    source "$PATH_TO_THIS_SCRIPT/venv/bin/activate"
     # Install required packages
     if [ -f requirements.txt ]; then
         pip install -r requirements.txt
     else
         echo "requirements.txt not found. Please provide a valid requirements file."
         exit 1
-    fi
-    # check if astroplan exists or install astroplan from github
-    if [ -d "$PATH_TO_THIS_SCRIPT/astroplan" ]; then
-        echo "astroplan already exists. Getting the latest updates."
-        cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
-        git pull
-        cd "$PATH_TO_THIS_SCRIPT" || exit 1
-    else
-        echo "astroplan not found. Cloning from GitHub."
-        git clone https://github.com/herpichfr/astroplan.git "$PATH_TO_THIS_SCRIPT/astroplan"
-        cd "$PATH_TO_THIS_SCRIPT/astroplan" || exit 1
-        python3 setup.py install
-        cd "$PATH_TO_THIS_SCRIPT" || exit 1
     fi
 
     echo "Dependencies installed successfully."
@@ -106,6 +95,7 @@ case "$1" in
     --install)
         check_basic_requirements
         install_dependencies
+        /bin/bash -c "deactivate; . $PATH_TO_THIS_SCRIPT/venv/bin/activate; exec bash -i"
         ;;
     --check)
         check_basic_requirements
