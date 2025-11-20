@@ -68,45 +68,39 @@ Usage examples
 
 * Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 0:30 LT
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --savefig test01``
+``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --savefig --figname test01``
 
 ![Example 1](figs/test01_2019-08-23_plan.png)
 
 * Showing the skychart for the same track
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --skychart --savefig test02``
+``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --skychart --savefig --figname test02``
 
 ![Example 2](figs/test02_2019-08-23_plan.png)
    
 * Adding an observing block starting at 0:30 LT for NGC104 at Cerro Tololo
 
-``python skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --blocktime 3851 --skychart --savefig test03``
+``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --blocktime 3851 --skychart --savefig --figname test03``
 
 ![Example 3](figs/test03_2019-08-23_plan.png)
 
 * Showing all tracks of a list of objects for Cerro Tololo
 
-``python skywalker.py -f example_file.csv --site 'Cerro Tololo' -ns 2019-08-23 --skychart --savefig test04``
+``python src/skywalker.py -f examples/example_file.csv --site 'Cerro Tololo' -ns 2019-08-23 --skychart --savefig --figname test04``
 
 ![Example 4](figs/test04_2019-08-23_plan.png)
 
 * Showing all tracks of a list of objects for a given observatory provided by the sitefile
 
-``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --savefig test05``
+``python src/skywalker.py -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --savefig --figname test05``
 
 ![Example 5](figs/test05_2019-08-23_plan.png)
 
 * Including an altitude/airmass limit to the observations
 
-``python skywalker.py -f example_file.csv --sitefile sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savefig test06``
+``python src/skywalker.py -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savefig --figname test06``
 
 ![Example 6](figs/test06_2019-08-23_plan.png)
-
-Last modifications
-------------------
-
-* 2020-03-12: Upgrading for Python 3 - Files modificated: skywalker.py and myastroplan/sky.py
-* 2025-05-21: Full refactoring of skywalker.py. Removing myastroplan in favour of a locally modified fork of astroplan. The modified version can be found in (https://github.com/herpichfr/astroplan).
 
 ## License
 
