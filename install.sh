@@ -95,7 +95,7 @@ case "$1" in
     --install)
         check_basic_requirements
         install_dependencies
-        /bin/bash -c "deactivate; . $PATH_TO_THIS_SCRIPT/venv/bin/activate; exec bash -i"
+        /bin/bash -c ". $PATH_TO_THIS_SCRIPT/venv/bin/activate; exec bash -i"
         ;;
     --check)
         check_basic_requirements
