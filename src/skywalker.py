@@ -33,6 +33,8 @@ def parse_args():
     parser.add_argument("--minalt", type=float, required=False, default=10,
                         help="Minimum altitude the telescope can safely go \
                         in degrees. Default is 10.")
+    parser.add_argument("--sites", action="store_true",
+                        help="List all available sites in the database.")
 
     # night
     parser.add_argument("--nightstarts", "-ns", type=str, required=False,
@@ -48,8 +50,9 @@ def parse_args():
     parser.add_argument("--ra", required=False,
                         help="Right Ascension of the object in degrees or \
                         hourangle. If using hourangle, set --raunit to 'hour'.")
-    parser.add_argument("--dec", required=False,
-                        help="Declination of the object in degrees.")
+    parser.add_argument("--dec", required=False, type=str,
+                        help="Declination of the object in degrees. \
+                        If using hexagesimal format, use --dec='DD:MM:SS'.")
     parser.add_argument("--raunit", type=str, default='deg',
                         help="Units of the RA parameter. Options: [hour, deg]. \
                         Default is deg.")
@@ -84,7 +87,27 @@ def parse_args():
                         help="Log level. Options: [DEBUG, INFO, WARNING, ERROR, CRITICAL]. \
                         Default is INFO.")
 
-    return parser.parse_args()
+    if '-h' in os.sys.argv or '--help' in os.sys.argv:
+        parser.print_help()
+        import sys
+        sys.exit(0)
+    try:
+        args = parser.parse_args()
+    except:
+        import sys
+        e = sys.exc_info()
+        parser.error(f"Argument error: {e}. \
+            If using hexagesimal DEC, use --dec='DD:MM:SS' to pass the argument.")
+    args = parser.parse_args()
+    if args.raunit not in ['deg', 'hour']:
+        parser.error("Invalid value for --raunit. Options are: [deg, hour].")
+    if args.raunit == 'deg' and args.ra is not None:
+        try:
+            float(args.ra)
+        except ValueError:
+            parser.error(
+                "If --raunit is 'deg', --ra must be a valid float value.")
+    return args
 
 
 def logger(logfile=None, loglevel=logging.INFO):
@@ -108,7 +131,14 @@ def logger(logfile=None, loglevel=logging.INFO):
 
 
 class Skywalker:
+    """
+    Skywalker class to visualize the sky at a given location and time.
+    It can plot the Moon, Sun, and a target object, and save the figure.
+    """
+
     def __init__(self, args):
+        """Initialize the Skywalker class with the given arguments."""
+
         self.location = None
         self.lat = args.lat
         self.lon = args.lon
@@ -147,13 +177,14 @@ class Skywalker:
         self.figname = args.figname
 
         self.observer = None
-        self.utcoffset = -3 * u.hour
+        self.utcoffset = 0 * u.hour
 
         self.logfile = args.logfile
         self.loglevel = args.loglevel
         self.logger = logger(self.logfile, self.loglevel)
 
     def set_location(self):
+        """Set the location of the observer based on the provided parameters."""
         if self.sitefile is not None:
             if not os.path.isfile(self.sitefile):
                 raise ValueError(f"File {self.sitefile} not found.")
@@ -178,24 +209,53 @@ class Skywalker:
         self.logger.info(f"Location set to {self.location}")
 
     def set_observer(self):
+        """Set the observer based on the location."""
         self.observer = Observer(self.location)
 
     def set_time(self):
-        if not self.time:
+        """Set the time of the observation."""
+        if self.time is None:
             self.inithour = "23:59:59"
         else:
+            if len(self.time.split(':')) != 3:
+                try:
+                    _time = float(self.time)
+                    _time_is_str = False
+                except ValueError:
+                    _time_is_str = True
+                if _time_is_str:
+                    while len(self.time.split(':')) < 3:
+                        self.time += ":00"
+                else:
+                    _time = f"{int(self.time)}"
+                    _time += f":{int((float(self.time) - int(self.time)) * 60)}"
+                    _time += ":00"
+                    self.time = _time
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
-        self.obs_time = Time(self.nightstarts + "T" +
-                             self.inithour, scale='utc', format='isot') - self.utcoffset
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(
             lng=self.location.lon.value, lat=self.location.lat.value)
         _timezone = pytz.timezone(timezone_str)
-        self.utcoffset = (_timezone.utcoffset(
-            self.obs_time.datetime).seconds / 3600 - 24) * u.hour
+        self.utcoffset = (_timezone.utcoffset(Time(self.nightstarts + "T" +
+                          self.inithour, format='isot').datetime).seconds / 3600 - 24) * u.hour
+        self.obs_time = Time(self.nightstarts + "T" +
+                             self.inithour, scale='utc', format='isot') - self.utcoffset
 
     def set_target(self, ra=None, dec=None):
+        """Set the target object based on the provided parameters.
+        If an object name is provided, it will try to resolve it to coordinates.
+        If RA and DEC are provided, it will create a SkyCoord object.
+        If a file is provided, it will load the coordinates from the file.
+
+        Parameters:
+        -----------
+        ra : str or float, optional
+            Right Ascension of the object in degrees or hourangle.
+            If using hourangle, set --raunit to 'hour'.
+        dec : str or float, optional
+            Declination of the object in degrees.
+        """
         if self.object:
             try:
                 self.target = SkyCoord.from_name(self.object)
@@ -203,8 +263,24 @@ class Skywalker:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
         elif (ra is not None) and (dec is not None):
-            self.target = SkyCoord(ra=self.ra,
-                                   dec=self.dec,
+            if self.raunit == 'hour':
+                if (":" in ra) and (len(ra.split(':')) < 3):
+                    _lenra = len(ra.split(':'))
+                    while _lenra < 3:
+                        ra += ":00"
+                        _lenra = len(ra.split(':'))
+            else:
+                try:
+                    ra = float(ra)
+                except ValueError:
+                    raise ValueError(
+                        f"RA '{ra}' is not a valid float or hour format.")
+                _ra = f"{int(ra)}"
+                _ra += f":{int((ra - int(ra)) * 60)}"
+                _ra += ":00"
+                ra = _ra
+            self.target = SkyCoord(ra=ra,
+                                   dec=dec,
                                    unit=(self.raunit, 'deg'))
         elif self.file:
             if not os.path.isfile(self.file):
@@ -216,6 +292,7 @@ class Skywalker:
             raise ValueError("No target specified.")
 
     def set_night_frames(self):
+        """Set the frames for the night observation."""
         _night_ends = (self.obs_time + .5 * u.day).strftime('%Y-%m-%d')
         _midnight = Time(f"{_night_ends}T00:00:00",
                          format='isot') - self.utcoffset
@@ -234,15 +311,30 @@ class Skywalker:
                                 self.moon.distance - _sun.distance * np.cos(elongation))
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
 
-    def check_blockinit_format(self):
-        if len(self.blockinit.split(':')) != 3:
-            _blockinit = self.blockinit.split(':')
-            if len(_blockinit) == 2:
-                self.blockinit = f"{_blockinit[0]}:{_blockinit[1]}:00"
-            elif len(_blockinit) == 1:
-                self.blockinit = f"{_blockinit[0]}:00:00"
+    def check_blockinit_format(self, blockinit=np.array([0])):
+        """Check the format of the blockinit parameter and convert it to HH:MM:SS format."""
+        _blockinit = blockinit.copy()
+        for i, binit in enumerate(blockinit):
+            try:
+                _blinit = float(binit)
+                _blinit_is_str = False
+            except ValueError:
+                _blinit_is_str = True
+
+            if _blinit_is_str:
+                while len(binit.split(':')) < 3:
+                    binit += ":00"
+            else:
+                _blinit = f"{int(binit)}"
+                _blinit += f":{int((float(binit) - int(binit)) * 60)}"
+                _blinit += ":00"
+                binit = _blinit
+            _blockinit[i] = binit
+
+            return _blockinit
 
     def set_target_list(self):
+        """Set the target list based on the provided parameters."""
         if self.load_file:
             df = pd.read_csv(self.file)
             if self.pid:
@@ -269,15 +361,25 @@ class Skywalker:
                     f"BLINIT column not found in {self.file}. \
                     Using time parameter as BLINIT.")
                 df['BLINIT'] = [self.time] * len(df)
+            else:
+                df['BLINIT'] = self.check_blockinit_format(df['BLINIT'])
+                df['BLINIT'] = df['BLINIT'].apply(
+                    lambda x: Time(self.nightstarts + "T" + x, format='isot').strftime('%H:%M:%S'))
             if 'BLOCKTIME' not in df.columns:
                 self.logger.warning(
                     f"BLOCKTIME column not found in {self.file}. \
                     Using 0 as BLOCKTIME.")
                 df['BLOCKTIME'] = [0] * len(df)
+            _coords = SkyCoord(ra=df['RA'],
+                               dec=df['DEC'],
+                               unit=(self.raunit, 'deg'))
+            df['RA'] = _coords.ra.value
+            df['DEC'] = _coords.dec.value
             self.target_list = df
         elif self.object:
             if self.blockinit:
-                self.check_blockinit_format()
+                self.blockinit = self.check_blockinit_format(
+                    np.array([self.blockinit]))
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -296,7 +398,8 @@ class Skywalker:
                  'BLOCKTIME': [blocktime.value]})
         elif (self.ra is not None) and (self.dec is not None):
             if self.blockinit:
-                self.check_blockinit_format()
+                self.blockinit = self.check_blockinit_format(
+                    np.array([self.blockinit]))
                 blinit = Time(self.nightstarts + "T" + self.blockinit,
                               format='isot').strftime('%H:%M:%S')
             else:
@@ -321,29 +424,55 @@ class Skywalker:
                 "No target specified. Please provide a target name or coordinates.")
 
     def set_skychart(self,
-                     observer,
-                     obj_coords,
-                     observe_time,
-                     ax,
-                     obj_style={'color': 'b'},
-                     hours_value=None
+                     observer: Observer,
+                     obj_coords: SkyCoord,
+                     observe_time: Time,
+                     ax: plt.Axes,
+                     obj_style: dict = {'color': 'b'},
+                     hours_value: np.ndarray = None
                      ):
+        """Set the skychart for the given object coordinates and observation time.
 
-        plot_sky(obj_coords,
-                 observer,
-                 observe_time,
-                 ax=ax,
-                 style_kwargs=obj_style,
-                 hours_value=hours_value)
+        Parameters:
+        -----------
+        observer : Observer
+            The observer object containing the location and time information.
+        obj_coords : SkyCoord
+            The coordinates of the object to plot.
+        observe_time : Time
+            The time of the observation.
+        ax : matplotlib.axes.Axes
+            The axes on which to plot the skychart.
+        obj_style : dict, optional
+            Style parameters for the object plot, such as color and marker.
+            Default is {'color': 'b'}.
+        hours_value : np.ndarray, optional
+            Array of hour values corresponding to the observation time.
+            If not provided, it will be calculated from the observe_time.
+        """
+
+        try:
+            plot_sky(obj_coords,
+                     observer,
+                     observe_time,
+                     ax=ax,
+                     style_kwargs=obj_style,
+                     hours_value=hours_value)
+        except TypeError as e:
+            self.logger.error(f"Error plotting skychart: {e}")
+            self.logger.error(
+                "The TypeError may be due to an incompatible version of astroplan.")
+            raise TypeError("Please ensure you have the modified astroplan version installed. \
+                            You can get the latest version from https://github.com/herpichfr/astroplan")
 
     def set_plot(self):
+        """Set the plot for the night observation."""
         if self.make_skychart:
             fig = plt.figure(figsize=(16, 6))
             ax1 = fig.add_subplot(121)
             ax3 = fig.add_subplot(122, projection='polar')
         else:
             fig, ax1 = plt.subplots(figsize=(8, 6))
-        plt.grid()
 
         if self.target_list.index.size > 1:
             is_list = True
@@ -378,10 +507,12 @@ class Skywalker:
             end_observable = self.frame_time_overnight[mask].obstime.max(
             )
             observe_time = Time(np.arange(init_observable.jd,
-                                          end_observable.jd, 1./24), format='jd')
+                                          end_observable.jd, 1./24),
+                                format='jd')
 
-            hours_values = np.array([obs_time.datetime.hour + self.utcoffset.value +
-                                     obs_time.datetime.minute / 60. for obs_time in observe_time])
+            hours_values = np.array([obs_time.datetime.hour +
+                                     obs_time.datetime.minute / 60.
+                                     for obs_time in observe_time + self.utcoffset])
 
             if myObjdf['BLOCKTIME'] > 0:
                 blocktime = float(myObjdf['BLOCKTIME']) * u.s
@@ -442,10 +573,11 @@ class Skywalker:
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
 
+            ax1.grid()
             # add distance to the moon at the time of the observation
             moon_distance = self.moon.separation(obj_coords).value
-            text_position = abs(self.delta_midnight.value - block_starts) == \
-                abs(self.delta_midnight.value - block_starts).min()
+            text_position = abs(self.delta_midnight.value - block_starts) == abs(
+                self.delta_midnight.value - block_starts).min()
             if myaltaz_overnight.alt.value[text_position].size == 0:
                 self.logger.warning(
                     f"Could not find altitude for {myObjdf['NAME']} at {block_starts}")
@@ -458,10 +590,16 @@ class Skywalker:
             else:
                 altitude_position = myaltaz_overnight.alt.value[text_position]
 
+            moon_is_up = self.delta_midnight[self.moonaltaz_time_overnight.alt.value > 0].value
+            if (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
+                text_colour = 'magenta'
+            else:
+                text_colour = 'c'
+
             ax1.text(block_starts - 0.3,
                      altitude_position - 3,
                      "%i" % moon_distance,
-                     fontsize=10, color='pink', zorder=12)
+                     fontsize=10, color=text_colour, zorder=12)
 
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
@@ -471,8 +609,16 @@ class Skywalker:
                  zorder=10)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
+                          u.deg) & (self.sunaltaz_time_overnight.alt > -6.3 * u.deg),
+                         color='indigo', zorder=0, alpha=0.8)
+        ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
+                         (self.sunaltaz_time_overnight.alt < -6 *
+                          u.deg) & (self.sunaltaz_time_overnight.alt > -12.3 * u.deg),
+                         color='indigo', zorder=1, alpha=0.9)
+        ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
+                         (self.sunaltaz_time_overnight.alt < -12 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -18 * u.deg),
-                         color='indigo', zorder=0)
+                         color='indigo', zorder=2, alpha=1)
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.moonaltaz_time_overnight.alt < 0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt < -18 * u.deg),
@@ -494,9 +640,10 @@ class Skywalker:
                 end_moon_time = self.moonaltaz_time_overnight.obstime[mask].max(
                 )
                 moon_time = Time(np.arange(init_moon_time.jd,
-                                           end_moon_time.jd, 1/24), format='jd')
-                moon_hours = np.array([obs_time.datetime.hour + self.utcoffset.value +
-                                       obs_time.datetime.minute / 60. for obs_time in moon_time])
+                                           end_moon_time.jd, 1/24),
+                                 format='jd')
+                moon_hours = np.array([obs_time.datetime.hour +
+                                       obs_time.datetime.minute / 60. for obs_time in moon_time + self.utcoffset])
 
                 self.set_skychart(self.observer, SkyCoord(ra=self.moon.ra,
                                                           dec=self.moon.dec),
@@ -583,5 +730,10 @@ class Skywalker:
 
 if __name__ == "__main__":
     args = parse_args()
-    Luke = Skywalker(args)
-    Luke.main()
+    if args.sites:
+        print("Available sites:")
+        for site in EarthLocation.get_site_names():
+            print(site)
+    else:
+        Luke = Skywalker(args)
+        Luke.main()
