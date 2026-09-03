@@ -109,6 +109,15 @@ Usage examples
 
 ![Example 6](figs/test06_2019-08-23_plan.png)
 
+Interactive hover
+-----------------
+
+When the figure is shown in an interactive window (i.e. not with a headless/``Agg``
+backend), moving the mouse over the altitude panel or the skychart shows a vertical time
+cursor with a sliding marker on every plotted track, and a box listing the hovered time
+plus the altitude and airmass of every object (and the Moon). Pass ``--no-hover`` to
+disable it; it has no effect on saved figures, which are unaffected either way.
+
 ## License
 
 This code is licensed under the [GNU v3.0 License](LICENSE).

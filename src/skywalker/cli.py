@@ -8,6 +8,7 @@ from astropy.coordinates.errors import UnknownSiteException
 from astropy.coordinates.name_resolve import NameResolveError
 from astropy.time import Time
 import astropy.units as u
+import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 import argparse
@@ -16,6 +17,8 @@ from astroplan import Observer
 from astroplan.plots import plot_sky
 from timezonefinder import TimezoneFinder
 import pytz
+
+from .hover import TimeCursor, hover_is_possible
 
 
 def parse_args():
@@ -82,6 +85,10 @@ def parse_args():
     parser.add_argument("--figname", "-fn", type=str, required=False,
                         help="Name of the figure to save. \
                         Default is skywalker_<nightstarts>.png.")
+    parser.add_argument("--no-hover", action="store_true",
+                        help="Disable the interactive hover time cursor that \
+                        shows the altitude and airmass of all targets at the \
+                        time under the mouse pointer.")
 
     # logging
     parser.add_argument("--logfile", type=str, default='skywalker.log',
@@ -177,6 +184,13 @@ class Skywalker:
         self.make_skychart = args.skychart
         self.savefig = args.savefig
         self.figname = args.figname
+        self.make_hover = not args.no_hover
+        self.fig = None
+        self.ax1 = None
+        self.ax2 = None
+        self.ax3 = None
+        self.tracks = []
+        self.time_cursor = None
 
         self.observer = None
         self.utcoffset = 0 * u.hour
@@ -469,12 +483,15 @@ class Skywalker:
 
     def set_plot(self):
         """Set the plot for the night observation."""
+        self.tracks = []           # reset: set_plot may be called more than once
         if self.make_skychart:
-            fig = plt.figure(figsize=(16, 6))
-            ax1 = fig.add_subplot(121)
-            ax3 = fig.add_subplot(122, projection='polar')
+            fig = self.fig = plt.figure(figsize=(16, 6))
+            ax1 = self.ax1 = fig.add_subplot(121)
+            ax3 = self.ax3 = fig.add_subplot(122, projection='polar')
         else:
             fig, ax1 = plt.subplots(figsize=(8, 6))
+            self.fig, self.ax1 = fig, ax1
+            ax3 = self.ax3 = None
 
         if self.target_list.index.size > 1:
             is_list = True
@@ -528,6 +545,7 @@ class Skywalker:
                              myaltaz_overnight.alt.value,
                              label=f"{myObjdf['NAME']}",
                              zorder=11)
+                _mycolor = p[0].get_color()
 
                 if myObjdf['BLOCKTIME'] > 0:
                     ax1.fill_between(self.delta_midnight.to('hr').value,
@@ -556,6 +574,7 @@ class Skywalker:
                                  lw=0, s=8, cmap='viridis',
                                  zorder=11)
                 plt.colorbar(sc, pad=0.1).set_label('Azimuth [deg]')
+                _mycolor = None
 
                 if myObjdf['BLOCKTIME'] > 0:
                     ax1.fill_between(self.delta_midnight.to('hr').value,
@@ -574,6 +593,12 @@ class Skywalker:
                                                  'c': hours_values,
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
+
+            self.tracks.append({'name': str(myObjdf['NAME']),
+                                'alt': myaltaz_overnight.alt.value,
+                                'az': myaltaz_overnight.az.value,
+                                'color': _mycolor,
+                                'is_moon': False})
 
             ax1.grid()
             # add distance to the moon at the time of the observation
@@ -609,6 +634,11 @@ class Skywalker:
                  label='Moon: %i%%' % (
                      self.moon_brightness.value * 100),
                  zorder=10)
+        self.tracks.append({'name': 'Moon',
+                            'alt': self.moonaltaz_time_overnight.alt.value,
+                            'az': self.moonaltaz_time_overnight.az.value,
+                            'color': 'c',
+                            'is_moon': True})
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -6.3 * u.deg),
@@ -686,7 +716,7 @@ class Skywalker:
         ax1.set_title(titlenight, fontsize=11)
         ax1.legend(loc='upper right', fontsize=8)
 
-        ax2 = ax1.twinx()
+        ax2 = self.ax2 = ax1.twinx()
         altitude = ax1.get_yticks() * u.deg
         airmass = 1. / np.cos(90 * u.deg - altitude)
         ax2.set_ylabel('Airmass')
@@ -718,7 +748,32 @@ class Skywalker:
                 self.logger.info(
                     f"Figure saved as skywalker_{self.nightstarts}.png")
                 print(f"Figure saved as skywalker_{self.nightstarts}.png")
+
+        if self.make_hover:
+            self.set_hover()
         plt.show()
+
+    def set_hover(self):
+        """Attach the interactive hover time cursor to the altitude plot."""
+        if not self.tracks:
+            self.logger.warning(
+                "No observable targets to hover: cursor not enabled.")
+            return
+        if not hover_is_possible(self.fig):
+            self.logger.info(
+                f"Backend '{matplotlib.get_backend()}' is not interactive: \
+                hover cursor not enabled.")
+            return
+        # Keep the reference: matplotlib holds callbacks weakly, so an
+        # unreferenced cursor is garbage collected and hover silently stops.
+        self.time_cursor = TimeCursor(self.fig, self.ax1, self.tracks,
+                                      self.delta_midnight.value,
+                                      ax2=self.ax2, ax3=self.ax3,
+                                      utcoffset=self.utcoffset.value,
+                                      minalt=self.minalt,
+                                      logger=self.logger).connect()
+        self.logger.info(
+            f"Hover cursor enabled for {len(self.tracks)} track(s).")
 
     def main(self):
         self.set_location()
