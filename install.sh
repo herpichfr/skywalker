@@ -87,7 +87,7 @@ function install_dependencies() {
 
 function uninstall_dependencies() {
     PATH_TO_THIS_SCRIPT=$(dirname "$(readlink -f "$0")")
-    echo "To uninstall venv, run the following command from within the directory you :"
+    echo "To uninstall skywalker, deactivate the virtual environment (if active) and remove it:"
     echo "deactivate && rm -rf $PATH_TO_THIS_SCRIPT/venv"
 }
 
@@ -95,7 +95,6 @@ case "$1" in
     --install)
         check_basic_requirements
         install_dependencies
-        /bin/bash -c ". $PATH_TO_THIS_SCRIPT/venv/bin/activate; exec bash -i"
         ;;
     --check)
         check_basic_requirements
