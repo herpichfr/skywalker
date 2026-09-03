@@ -16,14 +16,15 @@ Usage
 
 - to get the full set of options available with the full description:
 
-``python skywalker.py --help``
+``skywalker --help``
+
+(if you did not install the package, you can also run it in place with ``python -m skywalker --help`` from the ``src`` directory, or ``python src/skywalker/cli.py --help`` from the repository root)
 
 Requisites
 ----------
 
-``python 3``
+``python >= 3.9``
 
-``os``
 ``pandas``
 ``timezonefinder``
 ``pytz``
@@ -37,27 +38,33 @@ This code uses a modified version of the Astroplan code (https://astroplan.readt
 Installation
 ------------
 
-The package was only tested on Python 3.6 and above on Linux systems. There is no plans to make it work on Windows or MacOS.
-
-The following method is preferable for now, but fill free to install it in any other way you prefer.
+The package was only tested on Python 3.9 and above on Linux systems. There is no plans to make it work on Windows or MacOS.
 
 Clone the repository:
 
 ``git clone https://github.com/herpichfr/skywalker.git``
 
-Into the repository, run the following instructions.
+Into the repository, the package can be installed with pip (preferably inside a virtual environment):
 
-To check for dependencies, run:
+``pip install .``
+
+or, for an editable install while developing:
+
+``pip install -e .``
+
+This pulls in all dependencies, including the required fork of ``astroplan``, and installs a ``skywalker`` console command.
+
+Alternatively, the ``install.sh`` helper script can create a virtual environment and install the package into it for you.
+
+To check for basic system requirements (Python 3, pip, venv), run:
 
 ``bash install.sh --check``
 
-This will check if all the required packages are installed. If any of them is missing, it will print a message with the name of the package and how to install it.
-
-To install the required packages and dependencies, run (do not run the command with sudo):
+To create a virtual environment and install the package into it, run (do not run the command with sudo):
 
 ``bash install.sh --install``
 
-This will create a python virtual environment and install all the required packages in it, activating it if the install is successful. 
+This will create a python virtual environment and install the package and its dependencies in it, activating it if the install is successful.
 
 To uninstall the package, run:
 
@@ -68,37 +75,37 @@ Usage examples
 
 * Showing the track for NGC104 for Cerro Tololo and its distance to the Moon at 0:30 LT
 
-``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --savefig --figname test01``
+``skywalker --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --savefig --figname test01``
 
 ![Example 1](figs/test01_2019-08-23_plan.png)
 
 * Showing the skychart for the same track
 
-``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --skychart --savefig --figname test02``
+``skywalker --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --skychart --savefig --figname test02``
 
 ![Example 2](figs/test02_2019-08-23_plan.png)
    
 * Adding an observing block starting at 0:30 LT for NGC104 at Cerro Tololo
 
-``python src/skywalker.py --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --blocktime 3851 --skychart --savefig --figname test03``
+``skywalker --object NGC104 --site 'Cerro Tololo' -ns 2019-08-23 --time 0:30:00 --blocktime 3851 --skychart --savefig --figname test03``
 
 ![Example 3](figs/test03_2019-08-23_plan.png)
 
 * Showing all tracks of a list of objects for Cerro Tololo
 
-``python src/skywalker.py -f examples/example_file.csv --site 'Cerro Tololo' -ns 2019-08-23 --skychart --savefig --figname test04``
+``skywalker -f examples/example_file.csv --site 'Cerro Tololo' -ns 2019-08-23 --skychart --savefig --figname test04``
 
 ![Example 4](figs/test04_2019-08-23_plan.png)
 
 * Showing all tracks of a list of objects for a given observatory provided by the sitefile
 
-``python src/skywalker.py -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --savefig --figname test05``
+``skywalker -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --savefig --figname test05``
 
 ![Example 5](figs/test05_2019-08-23_plan.png)
 
 * Including an altitude/airmass limit to the observations
 
-``python src/skywalker.py -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savefig --figname test06``
+``skywalker -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --minalt 25 --savefig --figname test06``
 
 ![Example 6](figs/test06_2019-08-23_plan.png)
 

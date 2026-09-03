@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skywalker-astro"
+version = "0.1.0"
+description = "Plan and visualize altitude/azimuth tracks of astronomical objects for observers at any observatory on Earth."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Herpich F. R." }]
+requires-python = ">=3.9"
+dependencies = [
+    "astropy",
+    "matplotlib",
+    "pandas",
+    "timezonefinder",
+    "pytz",
+    "numpy",
+    "pyqt5",
+    "astroplan @ git+https://github.com/herpichfr/astroplan.git@master",
+]
+
+[project.urls]
+Homepage = "https://github.com/herpichfr/skywalker"
+
+[project.scripts]
+skywalker = "skywalker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

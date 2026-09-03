@@ -1,7 +1,0 @@
-astropy
-matplotlib
-pandas
-timezonefinder
-pytz
-pyqt5
-git+https://github.com/herpichfr/astroplan.git@master

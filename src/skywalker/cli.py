@@ -1,8 +1,11 @@
 #!/bin/python3
 
 import os
+import sys
 import numpy as np
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_body
+from astropy.coordinates.errors import UnknownSiteException
+from astropy.coordinates.name_resolve import NameResolveError
 from astropy.time import Time
 import astropy.units as u
 import matplotlib.pyplot as plt
@@ -87,18 +90,17 @@ def parse_args():
                         help="Log level. Options: [DEBUG, INFO, WARNING, ERROR, CRITICAL]. \
                         Default is INFO.")
 
-    if '-h' in os.sys.argv or '--help' in os.sys.argv:
+    if '-h' in sys.argv or '--help' in sys.argv:
         parser.print_help()
-        import sys
         sys.exit(0)
     try:
         args = parser.parse_args()
-    except:
-        import sys
+    except SystemExit:
+        raise
+    except Exception:
         e = sys.exc_info()
         parser.error(f"Argument error: {e}. \
             If using hexagesimal DEC, use --dec='DD:MM:SS' to pass the argument.")
-    args = parser.parse_args()
     if args.raunit not in ['deg', 'hour']:
         parser.error("Invalid value for --raunit. Options are: [deg, hour].")
     if args.raunit == 'deg' and args.ra is not None:
@@ -197,7 +199,7 @@ class Skywalker:
         elif self.site is not None:
             try:
                 self.location = EarthLocation.of_site(self.site)
-            except ValueError:
+            except UnknownSiteException:
                 raise ValueError(
                     f"Site '{self.site}' not found in the database.")
             self.sitename = self.site
@@ -227,10 +229,10 @@ class Skywalker:
                     while len(self.time.split(':')) < 3:
                         self.time += ":00"
                 else:
-                    _time = f"{int(self.time)}"
-                    _time += f":{int((float(self.time) - int(self.time)) * 60)}"
-                    _time += ":00"
-                    self.time = _time
+                    _time_str = f"{int(_time)}"
+                    _time_str += f":{int((_time - int(_time)) * 60)}"
+                    _time_str += ":00"
+                    self.time = _time_str
             self.inithour = Time(self.nightstarts + "T" + self.time,
                                  format='isot').strftime('%H:%M:%S')
         tf = TimezoneFinder()
@@ -259,7 +261,7 @@ class Skywalker:
         if self.object:
             try:
                 self.target = SkyCoord.from_name(self.object)
-            except ValueError:
+            except NameResolveError:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
         elif (ra is not None) and (dec is not None):
@@ -325,13 +327,13 @@ class Skywalker:
                 while len(binit.split(':')) < 3:
                     binit += ":00"
             else:
-                _blinit = f"{int(binit)}"
-                _blinit += f":{int((float(binit) - int(binit)) * 60)}"
-                _blinit += ":00"
-                binit = _blinit
+                _blinit_str = f"{int(_blinit)}"
+                _blinit_str += f":{int((_blinit - int(_blinit)) * 60)}"
+                _blinit_str += ":00"
+                binit = _blinit_str
             _blockinit[i] = binit
 
-            return _blockinit
+        return _blockinit
 
     def set_target_list(self):
         """Set the target list based on the provided parameters."""
@@ -588,10 +590,10 @@ class Skywalker:
                 altitude_position = myaltaz_overnight.alt.value[text_position].mean(
                 )
             else:
-                altitude_position = myaltaz_overnight.alt.value[text_position]
+                altitude_position = myaltaz_overnight.alt.value[text_position][0]
 
             moon_is_up = self.delta_midnight[self.moonaltaz_time_overnight.alt.value > 0].value
-            if (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
+            if moon_is_up.size > 0 and (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
                 text_colour = 'magenta'
             else:
                 text_colour = 'c'
@@ -728,7 +730,7 @@ class Skywalker:
         self.set_plot()
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     if args.sites:
         print("Available sites:")
@@ -737,3 +739,7 @@ if __name__ == "__main__":
     else:
         Luke = Skywalker(args)
         Luke.main()
+
+
+if __name__ == "__main__":
+    main()

@@ -65,11 +65,11 @@ function install_dependencies() {
     deactivate 2>/dev/null || true
     # Activate the virtual environment
     source "$PATH_TO_THIS_SCRIPT/venv/bin/activate"
-    # Install required packages
-    if [ -f requirements.txt ]; then
-        pip install -r requirements.txt
+    # Install the package and its dependencies
+    if [ -f "$PATH_TO_THIS_SCRIPT/pyproject.toml" ]; then
+        pip install -e "$PATH_TO_THIS_SCRIPT"
     else
-        echo "requirements.txt not found. Please provide a valid requirements file."
+        echo "pyproject.toml not found. Please run this script from within the skywalker repository."
         exit 1
     fi
 
@@ -82,7 +82,7 @@ function install_dependencies() {
     echo "source $PATH_TO_THIS_SCRIPT/venv/bin/activate"
     echo ""
     echo -e "${GREEN} Now you can run the script to test it (you can use an object of your choice):${DEFAULT}"
-    echo "python3 $PATH_TO_THIS_SCRIPT/src/skywalker.py --object sirius"
+    echo "skywalker --object sirius"
 }
 
 function uninstall_dependencies() {
