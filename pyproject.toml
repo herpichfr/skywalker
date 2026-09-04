@@ -21,6 +21,10 @@ dependencies = [
     "astroplan @ git+https://github.com/herpichfr/astroplan.git@master",
 ]
 
+[project.optional-dependencies]
+html = ["plotly>=5.15"]
+web = ["plotly>=5.15", "dash>=2.14,<5"]
+
 [project.urls]
 Homepage = "https://github.com/herpichfr/skywalker"
 

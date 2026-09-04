@@ -54,6 +54,14 @@ or, for an editable install while developing:
 
 This pulls in all dependencies, including the required fork of ``astroplan``, and installs a ``skywalker`` console command.
 
+To also be able to save interactive HTML figures with ``--savehtml`` (see below), install the optional ``html`` extra, which pulls in ``plotly``:
+
+``pip install -e '.[html]'``
+
+To use the interactive web UI (``--web``, see below), install the ``web`` extra instead, which pulls in ``plotly`` and ``dash``:
+
+``pip install -e '.[web]'``
+
 Alternatively, the ``install.sh`` helper script can create a virtual environment and install the package into it for you.
 
 To check for basic system requirements (Python 3, pip, venv), run:
@@ -69,6 +77,21 @@ This will create a python virtual environment and install the package and its de
 To uninstall the package, run:
 
 ``bash install.sh --uninstall``
+
+Right Ascension format
+-----------------------
+
+RA can be given as a decimal degree, sexagesimal degrees, or hourangle (the near-universal
+convention for RA). skywalker auto-detects which one you mean from explicit unit markers
+(e.g. ``16h23m33.78s`` or ``245.89d``) or, for a bare number, from its range (anything above
+24 can only be degrees). A value that could be read either way (e.g. ``16:23:33.78`` or
+``16.39``) is rejected with an error naming both readings; pass ``--raunit hour`` or
+``--raunit deg`` to force one, or write the value with explicit units.
+
+Note for anyone with plots made before this fix: sexagesimal RA used to be read as degrees
+regardless of format, which silently mis-plotted hourangle values (e.g. ``16:23:33.78``,
+meant as 16h23m, was read as 16°23' -- off by up to 90°). Figures made with ``--raunit deg``
+kept that reading; anything else should be regenerated.
 
 Usage examples
 --------------
@@ -117,6 +140,40 @@ backend), moving the mouse over the altitude panel or the skychart shows a verti
 cursor with a sliding marker on every plotted track, and a box listing the hovered time
 plus the altitude and airmass of every object (and the Moon). Pass ``--no-hover`` to
 disable it; it has no effect on saved figures, which are unaffected either way.
+
+Interactive HTML export
+------------------------
+
+Since a saved PNG can never hover, ``--savehtml`` writes a self-contained interactive
+HTML version of the figure (requires the ``html`` extra, see Installation above): hovering
+it in a browser shows the same vertical time cursor and per-object readout as the
+interactive window, including on the skychart panel.
+
+``skywalker -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --savehtml``
+
+By default the HTML file embeds ``plotly.js`` so it opens with no internet connection,
+which is the point at an observatory. Use ``--htmlname`` to choose the output file (default
+is ``skywalker_<nightstarts>.html``), and ``--htmljs cdn`` for a much smaller file that
+loads ``plotly.js`` from a CDN instead (needs internet to view).
+
+Interactive web UI
+-------------------
+
+``--web`` serves the same plot with a target table below it (requires the ``web`` extra,
+see Installation above), letting you include or remove targets live, or add a new one by
+name (looked up online) or by RA/Dec (works with no internet) while looking at the night:
+
+``skywalker -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --web``
+
+Then open the printed URL (``http://127.0.0.1:8050/`` by default) in a browser. The table
+lets you select all/none/invert, click a row to highlight its track in the plot, and copy
+or download the current selection as a CSV in skywalker's own format (decimal-degree RA/Dec,
+so it round-trips into ``skywalker -f`` with no ``--raunit`` needed). Every browser tab
+connected shares the same target list. ``--web`` binds to loopback (``127.0.0.1``) by
+default; for remote access, tunnel to it (``ssh -L 8050:localhost:8050 user@host``) rather
+than binding a public interface, since the app has no authentication in front of it. Object
+name lookups are cached to disk, so resolving names once online makes them work offline
+later.
 
 ## License
 

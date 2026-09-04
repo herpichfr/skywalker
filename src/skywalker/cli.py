@@ -19,9 +19,10 @@ from timezonefinder import TimezoneFinder
 import pytz
 
 from .hover import TimeCursor, hover_is_possible
+from .coords import parse_ra, parse_dec, parse_ra_column
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Skywalker: A tool to visualize the sky.")
     # site
@@ -54,14 +55,19 @@ def parse_args():
     parser.add_argument("--object", "-o", type=str, required=False,
                         help="Object to plot (e.g., 'M31'). Default is None.")
     parser.add_argument("--ra", required=False,
-                        help="Right Ascension of the object in degrees or \
-                        hourangle. If using hourangle, set --raunit to 'hour'.")
+                        help="Right Ascension of the object, in degrees or \
+                        hourangle, decimal or sexagesimal (e.g. '16:23:33.78' \
+                        or '245.89'). The unit is auto-detected when \
+                        possible; use --raunit to force it for an ambiguous \
+                        value.")
     parser.add_argument("--dec", required=False, type=str,
                         help="Declination of the object in degrees. \
                         If using hexagesimal format, use --dec='DD:MM:SS'.")
-    parser.add_argument("--raunit", type=str, default='deg',
-                        help="Units of the RA parameter. Options: [hour, deg]. \
-                        Default is deg.")
+    parser.add_argument("--raunit", type=str, default='auto',
+                        help="Units of the RA parameter. Options: \
+                        [auto, hour, deg]. 'auto' detects hourangle vs \
+                        degrees per value and errors on a genuinely \
+                        ambiguous one. Default is auto.")
     parser.add_argument("--obj_nme", type=str, required=False, default="Obj",
                         help="Name of the object to plot. \
                         Default is Obj.")
@@ -89,6 +95,39 @@ def parse_args():
                         help="Disable the interactive hover time cursor that \
                         shows the altitude and airmass of all targets at the \
                         time under the mouse pointer.")
+    parser.add_argument("--savehtml", action="store_true",
+                        help="Save an interactive HTML version of the figure, \
+                        with hover enabled. Requires plotly. Default is False.")
+    parser.add_argument("--htmlname", "-hn", type=str, required=False,
+                        help="Name of the HTML file to save. \
+                        Default is skywalker_<nightstarts>.html.")
+    parser.add_argument("--htmljs", type=str, default="embed",
+                        choices=["embed", "cdn", "directory"],
+                        help="How to include plotly.js: embed (self-contained, \
+                        works offline), cdn (small file, needs internet), or \
+                        directory (shared plotly.min.js). Default is embed.")
+
+    # web
+    parser.add_argument("--web", action="store_true",
+                        help="Serve an interactive web page with the plot \
+                        and a target table below it, letting you include, \
+                        remove or add targets live. Requires dash. Every \
+                        browser tab connected shares the same target list. \
+                        Default is False.")
+    parser.add_argument("--web-host", type=str, default="127.0.0.1",
+                        help="Interface to bind the web server to. \
+                        Default is 127.0.0.1 (loopback only); a \
+                        non-loopback host has no authentication in front \
+                        of it, so prefer an SSH tunnel for remote access.")
+    parser.add_argument("--web-port", type=int, default=8050,
+                        help="TCP port for the web server. Default is 8050.")
+    parser.add_argument("--web-open", action="store_true",
+                        help="Open the web UI in the default browser once \
+                        the server is listening.")
+    parser.add_argument("--web-debug", action="store_true",
+                        help="Enable the Dash/Werkzeug debugger. Refused \
+                        unless --web-host is a loopback address, since the \
+                        debugger allows remote code execution.")
 
     # logging
     parser.add_argument("--logfile", type=str, default='skywalker.log',
@@ -97,25 +136,26 @@ def parse_args():
                         help="Log level. Options: [DEBUG, INFO, WARNING, ERROR, CRITICAL]. \
                         Default is INFO.")
 
-    if '-h' in sys.argv or '--help' in sys.argv:
+    _argv = sys.argv[1:] if argv is None else argv
+    if '-h' in _argv or '--help' in _argv:
         parser.print_help()
         sys.exit(0)
     try:
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
     except SystemExit:
         raise
     except Exception:
         e = sys.exc_info()
         parser.error(f"Argument error: {e}. \
             If using hexagesimal DEC, use --dec='DD:MM:SS' to pass the argument.")
-    if args.raunit not in ['deg', 'hour']:
-        parser.error("Invalid value for --raunit. Options are: [deg, hour].")
-    if args.raunit == 'deg' and args.ra is not None:
+    if args.raunit not in ['auto', 'deg', 'hour']:
+        parser.error(
+            "Invalid value for --raunit. Options are: [auto, deg, hour].")
+    if args.ra is not None:
         try:
-            float(args.ra)
-        except ValueError:
-            parser.error(
-                "If --raunit is 'deg', --ra must be a valid float value.")
+            parse_ra(args.ra, raunit=args.raunit, context=" for --ra")
+        except ValueError as e:
+            parser.error(str(e))
     return args
 
 
@@ -185,6 +225,14 @@ class Skywalker:
         self.savefig = args.savefig
         self.figname = args.figname
         self.make_hover = not args.no_hover
+        self.savehtml = args.savehtml
+        self.htmlname = args.htmlname
+        self.htmljs = args.htmljs
+        self.web = args.web
+        self.web_host = args.web_host
+        self.web_port = args.web_port
+        self.web_open = args.web_open
+        self.web_debug = args.web_debug
         self.fig = None
         self.ax1 = None
         self.ax2 = None
@@ -267,8 +315,9 @@ class Skywalker:
         Parameters:
         -----------
         ra : str or float, optional
-            Right Ascension of the object in degrees or hourangle.
-            If using hourangle, set --raunit to 'hour'.
+            Right Ascension of the object, in degrees or hourangle, decimal
+            or sexagesimal. The unit is auto-detected unless --raunit forces
+            one; see coords.parse_ra().
         dec : str or float, optional
             Declination of the object in degrees.
         """
@@ -279,25 +328,10 @@ class Skywalker:
                 raise ValueError(
                     f"Object '{self.object}' not found in the database.")
         elif (ra is not None) and (dec is not None):
-            if self.raunit == 'hour':
-                if (":" in ra) and (len(ra.split(':')) < 3):
-                    _lenra = len(ra.split(':'))
-                    while _lenra < 3:
-                        ra += ":00"
-                        _lenra = len(ra.split(':'))
-            else:
-                try:
-                    ra = float(ra)
-                except ValueError:
-                    raise ValueError(
-                        f"RA '{ra}' is not a valid float or hour format.")
-                _ra = f"{int(ra)}"
-                _ra += f":{int((ra - int(ra)) * 60)}"
-                _ra += ":00"
-                ra = _ra
-            self.target = SkyCoord(ra=ra,
-                                   dec=dec,
-                                   unit=(self.raunit, 'deg'))
+            _ra_deg = parse_ra(ra, raunit=self.raunit, context=" for --ra")
+            _dec_deg = parse_dec(dec)
+            self.target = SkyCoord(ra=_ra_deg, dec=_dec_deg,
+                                   unit=('deg', 'deg'))
         elif self.file:
             if not os.path.isfile(self.file):
                 raise ValueError(f"File {self.file} not found.")
@@ -386,11 +420,12 @@ class Skywalker:
                     f"BLOCKTIME column not found in {self.file}. \
                     Using 0 as BLOCKTIME.")
                 df['BLOCKTIME'] = [0] * len(df)
-            _coords = SkyCoord(ra=df['RA'],
-                               dec=df['DEC'],
-                               unit=(self.raunit, 'deg'))
-            df['RA'] = _coords.ra.value
-            df['DEC'] = _coords.dec.value
+            _ra_deg, _ra_warning = parse_ra_column(
+                df['RA'], raunit=self.raunit, names=df['NAME'])
+            if _ra_warning is not None:
+                self.logger.warning(_ra_warning)
+            df['RA'] = _ra_deg
+            df['DEC'] = np.array([parse_dec(v) for v in df['DEC']])
             self.target_list = df
         elif self.object:
             if self.blockinit:
@@ -439,6 +474,12 @@ class Skywalker:
             raise ValueError(
                 "No target specified. Please provide a target name or coordinates.")
 
+    @staticmethod
+    def set_empty_target_list():
+        """An empty target list with the columns set_plot() expects."""
+        return pd.DataFrame(columns=['NAME', 'RA', 'DEC', 'BLINIT',
+                                     'BLOCKTIME'])
+
     def set_skychart(self,
                      observer: Observer,
                      obj_coords: SkyCoord,
@@ -481,6 +522,113 @@ class Skywalker:
             raise TypeError("Please ensure you have the modified astroplan version installed. \
                             You can get the latest version from https://github.com/herpichfr/astroplan")
 
+    def compute_track(self, name, ra, dec, blinit, blocktime=0., color=None):
+        """Compute one target's track dict, without touching matplotlib.
+
+        Parameters:
+        -----------
+        name : str
+            Name of the target, as it should appear in the legend.
+        ra, dec : float
+            Coordinates in degrees, already resolved and unit-normalised.
+        blinit : str
+            Local start of the observing block, "HH:MM:SS".
+        blocktime : float, optional
+            Length of the observing block in seconds; 0 means no block.
+        color : str, optional
+            Colour to record for the renderers. None means "no colour of
+            its own": set_plot() fills it in from the matplotlib artist and
+            the HTML/hover renderers fall back to the shared palette.
+
+        Returns the track dict, or None if the target is never above the
+        horizon while the Sun is down -- the caller's cue to skip it.
+        """
+        obj_coords = SkyCoord(ra=ra, dec=dec, unit=('deg', 'deg'))
+
+        block_starts = float(blinit.split(':')[0]) + \
+            float(blinit.split(':')[1]) / 60. + \
+            float(blinit.split(':')[2]) / 3600.
+        if block_starts > 12.:
+            block_starts -= 24
+
+        myaltaz_overnight = obj_coords.transform_to(
+            self.frame_time_overnight)
+
+        mask = myaltaz_overnight.alt > 0 * u.deg
+        mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
+        if mask.sum() == 0:
+            self.logger.warning(
+                f"Object {name} is not observable at the given \
+                    time and observatory.")
+            return None
+
+        init_observable = self.frame_time_overnight[mask].obstime.min(
+        )
+        end_observable = self.frame_time_overnight[mask].obstime.max(
+        )
+        observe_time = Time(np.arange(init_observable.jd,
+                                      end_observable.jd, 1./24),
+                            format='jd')
+
+        hours_values = np.array([obs_time.datetime.hour +
+                                 obs_time.datetime.minute / 60.
+                                 for obs_time in observe_time + self.utcoffset])
+
+        if self.make_skychart:
+            _chart_altaz = self.observer.altaz(observe_time, obj_coords)
+            _chart_alt = _chart_altaz.alt.value
+            _chart_az = _chart_altaz.az.value
+        else:
+            _chart_alt = _chart_az = None
+
+        _block_ends = block_starts
+        if blocktime > 0:
+            _blocktime = float(blocktime) * u.s
+            _blocktime = _blocktime.to(u.hour).value
+            _block_ends = block_starts + _blocktime
+        else:
+            print("Block time is 0")
+
+        moon_distance = self.moon.separation(obj_coords).value
+        text_position = abs(self.delta_midnight.value - block_starts) == abs(
+            self.delta_midnight.value - block_starts).min()
+        if myaltaz_overnight.alt.value[text_position].size == 0:
+            self.logger.warning(
+                f"Could not find altitude for {name} at {block_starts}")
+            altitude_position = 0.0
+        elif myaltaz_overnight.alt.value[text_position].size > 1:
+            self.logger.warning(
+                f"Found more than one altitude for {name} at {block_starts}")
+            altitude_position = myaltaz_overnight.alt.value[text_position].mean(
+            )
+        else:
+            altitude_position = myaltaz_overnight.alt.value[text_position][0]
+
+        moon_is_up = self.delta_midnight[self.moonaltaz_time_overnight.alt.value > 0].value
+        if moon_is_up.size > 0 and (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
+            text_colour = 'magenta'
+        else:
+            text_colour = 'c'
+
+        return {'name': str(name),
+               'alt': myaltaz_overnight.alt.value,
+               'az': myaltaz_overnight.az.value,
+               'color': color,
+               'is_moon': False,
+               'has_block': blocktime > 0,
+               'block_starts': block_starts,
+               'block_ends': _block_ends,
+               'moon_distance': moon_distance,
+               'label_x': block_starts - 0.3,
+               'label_y': altitude_position - 3,
+               'label_color': text_colour,
+               'chart_alt': _chart_alt,
+               'chart_az': _chart_az,
+               'chart_hours': hours_values if self.make_skychart else None,
+               'coords': obj_coords,
+               'observe_time': observe_time,
+               'hours': hours_values}
+
     def set_plot(self):
         """Set the plot for the night observation."""
         self.tracks = []           # reset: set_plot may be called more than once
@@ -500,49 +648,21 @@ class Skywalker:
 
         for index in self.target_list.index:
             myObjdf = self.target_list.loc[index]
-            obj_coords = SkyCoord(ra=myObjdf['RA'],
-                                  dec=myObjdf['DEC'],
-                                  unit=('deg', 'deg'))
-
-            block_starts = float(myObjdf['BLINIT'].split(':')[0]) + \
-                float(myObjdf['BLINIT'].split(':')[1]) / 60. + \
-                float(myObjdf['BLINIT'].split(':')[2]) / 3600.
-            if block_starts > 12.:
-                block_starts -= 24
-
-            myaltaz_overnight = obj_coords.transform_to(
-                self.frame_time_overnight)
-
-            mask = myaltaz_overnight.alt > 0 * u.deg
-            mask &= self.sunaltaz_time_overnight.alt < 0 * u.deg
-            if mask.sum() == 0:
-                self.logger.warning(
-                    f"Object {myObjdf['NAME']} is not observable at the given \
-                    time and observatory.")
+            _track = self.compute_track(myObjdf['NAME'], myObjdf['RA'],
+                                        myObjdf['DEC'], myObjdf['BLINIT'],
+                                        blocktime=myObjdf['BLOCKTIME'])
+            if _track is None:
                 continue
 
-            init_observable = self.frame_time_overnight[mask].obstime.min(
-            )
-            end_observable = self.frame_time_overnight[mask].obstime.max(
-            )
-            observe_time = Time(np.arange(init_observable.jd,
-                                          end_observable.jd, 1./24),
-                                format='jd')
-
-            hours_values = np.array([obs_time.datetime.hour +
-                                     obs_time.datetime.minute / 60.
-                                     for obs_time in observe_time + self.utcoffset])
-
-            if myObjdf['BLOCKTIME'] > 0:
-                blocktime = float(myObjdf['BLOCKTIME']) * u.s
-                blocktime = blocktime.to(u.hour).value
-                block_ends = block_starts + blocktime
-            else:
-                print("Block time is 0")
+            obj_coords = _track['coords']
+            observe_time = _track['observe_time']
+            hours_values = _track['hours']
+            block_starts = _track['block_starts']
+            block_ends = _track['block_ends']
 
             if is_list:
                 p = ax1.plot(self.delta_midnight.value,
-                             myaltaz_overnight.alt.value,
+                             _track['alt'],
                              label=f"{myObjdf['NAME']}",
                              zorder=11)
                 _mycolor = p[0].get_color()
@@ -551,7 +671,7 @@ class Skywalker:
                     ax1.fill_between(self.delta_midnight.to('hr').value,
                                      np.zeros(
                         len(self.delta_midnight.value)),
-                        myaltaz_overnight.alt.value,
+                        _track['alt'],
                         (self.delta_midnight.value >= block_starts) & (
                         self.delta_midnight.value <= block_ends),
                         color=p[0].get_color(),
@@ -568,8 +688,8 @@ class Skywalker:
                           "observe_time:", observe_time)
             else:
                 sc = ax1.scatter(self.delta_midnight.value,
-                                 myaltaz_overnight.alt.value,
-                                 c=myaltaz_overnight.az.value,
+                                 _track['alt'],
+                                 c=_track['az'],
                                  label=myObjdf['NAME'],
                                  lw=0, s=8, cmap='viridis',
                                  zorder=11)
@@ -580,7 +700,7 @@ class Skywalker:
                     ax1.fill_between(self.delta_midnight.to('hr').value,
                                      np.zeros(
                         len(self.delta_midnight.value)),
-                        myaltaz_overnight.alt.value,
+                        _track['alt'],
                         (self.delta_midnight.value >= block_starts) & (
                         self.delta_midnight.value <= block_ends),
                         color='orange', zorder=11)
@@ -594,39 +714,15 @@ class Skywalker:
                                                  'label': myObjdf['NAME']},
                                       hours_value=hours_values)
 
-            self.tracks.append({'name': str(myObjdf['NAME']),
-                                'alt': myaltaz_overnight.alt.value,
-                                'az': myaltaz_overnight.az.value,
-                                'color': _mycolor,
-                                'is_moon': False})
-
             ax1.grid()
-            # add distance to the moon at the time of the observation
-            moon_distance = self.moon.separation(obj_coords).value
-            text_position = abs(self.delta_midnight.value - block_starts) == abs(
-                self.delta_midnight.value - block_starts).min()
-            if myaltaz_overnight.alt.value[text_position].size == 0:
-                self.logger.warning(
-                    f"Could not find altitude for {myObjdf['NAME']} at {block_starts}")
-                altitude_position = 0.0
-            elif myaltaz_overnight.alt.value[text_position].size > 1:
-                self.logger.warning(
-                    f"Found more than one altitude for {myObjdf['NAME']} at {block_starts}")
-                altitude_position = myaltaz_overnight.alt.value[text_position].mean(
-                )
-            else:
-                altitude_position = myaltaz_overnight.alt.value[text_position][0]
 
-            moon_is_up = self.delta_midnight[self.moonaltaz_time_overnight.alt.value > 0].value
-            if moon_is_up.size > 0 and (block_starts > moon_is_up.min()) and (block_starts < moon_is_up.max()):
-                text_colour = 'magenta'
-            else:
-                text_colour = 'c'
+            ax1.text(_track['label_x'],
+                     _track['label_y'],
+                     "%i" % _track['moon_distance'],
+                     fontsize=10, color=_track['label_color'], zorder=12)
 
-            ax1.text(block_starts - 0.3,
-                     altitude_position - 3,
-                     "%i" % moon_distance,
-                     fontsize=10, color=text_colour, zorder=12)
+            _track['color'] = _mycolor
+            self.tracks.append(_track)
 
         ax1.plot(self.delta_midnight.to('hr').value,
                  self.moonaltaz_time_overnight.alt.value,
@@ -634,11 +730,6 @@ class Skywalker:
                  label='Moon: %i%%' % (
                      self.moon_brightness.value * 100),
                  zorder=10)
-        self.tracks.append({'name': 'Moon',
-                            'alt': self.moonaltaz_time_overnight.alt.value,
-                            'az': self.moonaltaz_time_overnight.az.value,
-                            'color': 'c',
-                            'is_moon': True})
         ax1.fill_between(self.delta_midnight.to('hr').value, 0, 90,
                          (self.sunaltaz_time_overnight.alt < -0 *
                           u.deg) & (self.sunaltaz_time_overnight.alt > -6.3 * u.deg),
@@ -662,6 +753,7 @@ class Skywalker:
                          alpha=1. - self.moon_brightness.value,
                          zorder=2)
 
+        _moon_chart_alt = _moon_chart_az = _moon_chart_hours = None
         if self.make_skychart:
             # plot the moon into skychart
             mask = self.sunaltaz_time_overnight.alt < 0 * u.deg
@@ -684,6 +776,11 @@ class Skywalker:
                                              'marker': 'o',
                                              'label': 'Moon: %i%%' % (self.moon_brightness.value * 100)},
                                   hours_value=moon_hours)
+                _moon_chart_altaz = self.observer.altaz(
+                    moon_time, SkyCoord(ra=self.moon.ra, dec=self.moon.dec))
+                _moon_chart_alt = _moon_chart_altaz.alt.value
+                _moon_chart_az = _moon_chart_altaz.az.value
+                _moon_chart_hours = moon_hours
             else:
                 self.logger.warning(
                     "Moon is not observable at the given time and observatory.")
@@ -697,6 +794,22 @@ class Skywalker:
             circle = plt.Circle((0., 0.), 90 - self.minalt, transform=ax3.transData._b,
                                 color="black", alpha=1. - self.moon_brightness.value, zorder=0)
             ax3.add_artist(circle)
+
+        self.tracks.append({'name': 'Moon',
+                            'alt': self.moonaltaz_time_overnight.alt.value,
+                            'az': self.moonaltaz_time_overnight.az.value,
+                            'color': 'c',
+                            'is_moon': True,
+                            'has_block': False,
+                            'block_starts': 0.,
+                            'block_ends': 0.,
+                            'moon_distance': None,
+                            'label_x': None,
+                            'label_y': None,
+                            'label_color': None,
+                            'chart_alt': _moon_chart_alt,
+                            'chart_az': _moon_chart_az,
+                            'chart_hours': _moon_chart_hours})
 
         minx = self.delta_midnight.value[self.sunaltaz_time_overnight.alt < -
                                          0 * u.deg].min() - 1
@@ -749,6 +862,9 @@ class Skywalker:
                     f"Figure saved as skywalker_{self.nightstarts}.png")
                 print(f"Figure saved as skywalker_{self.nightstarts}.png")
 
+        if self.savehtml:
+            # Written before plt.show(), which blocks until the window closes.
+            self.set_htmlplot()
         if self.make_hover:
             self.set_hover()
         plt.show()
@@ -775,7 +891,69 @@ class Skywalker:
         self.logger.info(
             f"Hover cursor enabled for {len(self.tracks)} track(s).")
 
+    def _html_filename(self):
+        """Name of the HTML file to save, mirroring the --figname convention."""
+        if self.htmlname:
+            name = self.htmlname
+        else:
+            name = f"skywalker_{self.nightstarts}.html"
+        if not name.lower().endswith(('.html', '.htm')):
+            name += '.html'
+        return name
+
+    def set_htmlplot(self):
+        """Write an interactive HTML version of the figure, using plotly."""
+        if not self.tracks:
+            self.logger.warning(
+                "No observable targets to plot: HTML figure not written.")
+            return
+        from . import htmlplot          # pure Python: no plotly needed to import it
+        _local_times = (self.frame_time_overnight.obstime
+                        + self.utcoffset).datetime
+        try:
+            _path = htmlplot.render(
+                tracks=self.tracks,
+                local_times=_local_times,
+                delta_hours=self.delta_midnight.value,
+                sun_alt=self.sunaltaz_time_overnight.alt.value,
+                moon_alt=self.moonaltaz_time_overnight.alt.value,
+                moon_brightness=self.moon_brightness.value,
+                minalt=self.minalt,
+                utcoffset_h=int(self.utcoffset.value),
+                sitename=self.sitename,
+                nightstarts=self.nightstarts,
+                make_skychart=self.make_skychart,
+                filename=self._html_filename(),
+                include_js=self.htmljs,
+                logger=self.logger)
+        except ImportError as e:
+            self.logger.error(str(e))
+            return
+        self.logger.info(f"Interactive figure saved as {_path}")
+        print(f"Interactive figure saved as {_path}")
+
+    def set_webapp(self):
+        """Serve the interactive plot and target table over HTTP, using dash."""
+        matplotlib.use('Agg')      # web mode never opens a GUI figure
+        from . import webapp
+        webapp.run_webapp(self, host=self.web_host, port=self.web_port,
+                          debug=self.web_debug, open_browser=self.web_open)
+
     def main(self):
+        if self.web:
+            self.set_location()
+            self.set_observer()
+            self.set_time()
+            self.set_night_frames()
+            if (self.object or self.file
+                    or (self.ra is not None and self.dec is not None)):
+                self.set_target(ra=self.ra, dec=self.dec)
+                self.set_target_list()
+            else:
+                self.target_list = Skywalker.set_empty_target_list()
+            self.set_webapp()
+            return
+
         self.set_location()
         self.set_observer()
         self.set_time()
