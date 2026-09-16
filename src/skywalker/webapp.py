@@ -24,10 +24,11 @@ round-trip. The registry is shared by every browser tab that connects to
 this process (single-observer tool -- see --web's help text).
 """
 
+import re
 import threading
 
 import numpy as np
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.coordinates.name_resolve import NameResolveError
 
 from . import coords
@@ -35,11 +36,11 @@ from . import plotdata
 
 _COLUMNS = [
     {'name': '', 'id': 'swatch'},
-    {'name': 'Target', 'id': 'name'},
-    {'name': 'RA', 'id': 'ra'},
-    {'name': 'Dec', 'id': 'dec'},
-    {'name': 'Block', 'id': 'blinit'},
-    {'name': 'Dur', 'id': 'blockdur'},
+    {'name': 'Target', 'id': 'name', 'editable': True},
+    {'name': 'RA', 'id': 'ra', 'editable': True},
+    {'name': 'Dec', 'id': 'dec', 'editable': True},
+    {'name': 'Block', 'id': 'blinit', 'editable': True},
+    {'name': 'Dur', 'id': 'blockdur', 'editable': True},
     {'name': 'Peak alt', 'id': 'peakalt'},
     {'name': 'at', 'id': 'peaktime'},
     {'name': 'Best X', 'id': 'airmass'},
@@ -72,6 +73,22 @@ def _format_blinit(value):
     into a fixed-width numpy string array before padding, so a short value
     like "20:30" can silently truncate back to 5 characters after ":00" is
     appended. Plain string ops have no such width limit.
+
+    Raises ValueError unless the result is a genuine 0 <= H < 24,
+    0 <= M < 60, 0 <= S < 60 clock time, WITH one exemption: "24:00:00"
+    (H==24 and M==S==0) is also accepted, because this same helper also
+    normalizes a block END via _resolve_blocktime(), where "24:00" is
+    standard end-of-day notation -- _hours_from_hhmmss() already
+    normalizes "24:00:00" to 0.0, and _resolve_blocktime()'s past-midnight
+    wrap then yields the correct duration from it, exactly as it does for
+    "00:00:00". Refusing "24:00" here would silence that, not fix
+    anything. This used to accept genuine garbage like "25:99:99"
+    outright, silently, which is what the rest of this check still
+    catches. All three call sites -- the Add-target form's block-start
+    field, the table's editable Block cell, and the block-end field
+    inside _resolve_blocktime() -- already wrap this call in a
+    try/except, so raising here is enough to make all three reject bad
+    input.
     """
     _value = str(value).strip()
     try:
@@ -80,10 +97,22 @@ def _format_blinit(value):
         _parts = _value.split(':')
         while len(_parts) < 3:
             _parts.append('00')
-        return ':'.join(_parts)
-    _h = int(_dec)
-    _m = int(round((_dec - _h) * 60.))
-    return f"{_h}:{_m:02d}:00"
+        _result = ':'.join(_parts)
+    else:
+        _h = int(_dec)
+        _m = int(round((_dec - _h) * 60.))
+        _result = f"{_h}:{_m:02d}:00"
+    try:
+        _h, _m, _s = (float(_p) for _p in _result.split(':'))
+    except ValueError:
+        raise ValueError(f"'{_value}' is not a valid HH:MM:SS time.")
+    _is_end_of_day = (_h == 24. and _m == 0. and _s == 0.)
+    if not _is_end_of_day and not (
+            0. <= _h < 24. and 0. <= _m < 60. and 0. <= _s < 60.):
+        raise ValueError(
+            f"'{_value}' is not a valid HH:MM:SS time: hours must be "
+            "0-23 (or exactly 24:00:00), minutes/seconds 0-59.")
+    return _result
 
 
 def _hours_from_hhmmss(hhmmss):
@@ -129,6 +158,35 @@ def _sanitize_name(name):
     return name.strip().replace('"', '').replace(',', '')
 
 
+_BLOCKDUR_RE = re.compile(r'^(\d+)h(\d{1,2})$')
+
+
+def _parse_blockdur(text):
+    """Seconds from a Dur cell's "<H>h<MM>" / "<M>m" / "\u2014" display text.
+
+    Inverts plotdata.track_summary()'s '%ih%02d'/'%im'/'\u2014' formatting,
+    so editing the Dur cell round-trips through the same convention the
+    table already displays. A bare number is read as seconds, matching
+    the Add-target form's "Block size [s]" field. Raises ValueError on
+    anything else.
+    """
+    _text = str(text).strip()
+    if not _text or _text == '\u2014':
+        return 0.
+    try:
+        return float(_text)
+    except ValueError:
+        pass
+    _match = _BLOCKDUR_RE.match(_text)
+    if _match:
+        return int(_match.group(1)) * 3600. + int(_match.group(2)) * 60.
+    if _text.endswith('m') and _text[:-1].isdigit():
+        return float(_text[:-1]) * 60.
+    raise ValueError(
+        f"Bad block duration {_text!r}: use '1h30', '45m', or a number "
+        "of seconds.")
+
+
 class TrackRegistry:
     """Server-side store of the session's tracks, keyed by target name.
 
@@ -141,11 +199,15 @@ class TrackRegistry:
         self.walker = walker
         self.tracks = {}            # name -> track dict, insertion-ordered
         self.colors = {}            # name -> hex colour, never pruned
-        self.year_curves = {}       # name -> year curve dict, never pruned
+        self.year_curves = {}       # name -> year curve dict
                                     # (see year_series()) -- a curve is a
                                     # pure function of a target's
-                                    # coordinates and the site, so it can
-                                    # never go stale
+                                    # coordinates and the site, so it goes
+                                    # stale when either changes; a
+                                    # coordinate edit pops just that
+                                    # target's entry (see recompute()) and
+                                    # a site change clears the whole cache
+                                    # (see apply_site())
         self.color_cursor = 0
         self.lock = threading.Lock()
         self.local_times = (walker.frame_time_overnight.obstime
@@ -193,6 +255,73 @@ class TrackRegistry:
             for _name in names:
                 self.tracks.pop(_name, None)
 
+    def recompute(self, name, ra_deg, dec_deg, blinit, blocktime=0.):
+        """Recompute one existing target's track in place, same colour.
+
+        Used by a cell edit (Feature 2) to turn a (possibly new)
+        coordinate/block pair into a fresh track dict without
+        duplicating cli.Skywalker.compute_track()'s call convention.
+        NOT used by apply_site()'s per-target rebuild, which calls
+        self.walker.compute_track() directly instead: this method takes
+        self.lock, and apply_site() already holds it for the whole
+        rebuild, so calling this from inside apply_site() would deadlock
+        on self.lock, a non-reentrant threading.Lock.
+
+        Returns (track, error_message). On error self.tracks is left
+        untouched. Does not touch self.year_curves -- an edited
+        coordinate goes stale, a re-timed block does not, so the caller
+        decides whether to invalidate that target's curve.
+        """
+        with self.lock:
+            if name not in self.tracks:
+                return None, f"'{name}' is not a known target."
+            _color = self.colors.get(name)
+            _track = self.walker.compute_track(
+                name, ra_deg, dec_deg, blinit, blocktime=blocktime,
+                color=_color)
+            if _track is None:
+                return None, (
+                    f"{name} never rises above the horizon while the Sun "
+                    f"is down at {self.walker.sitename} on the night of "
+                    f"{self.walker.nightstarts}.")
+            self.tracks[name] = _track
+            return _track, None
+
+    def rename(self, old_name, new_name):
+        """Rename an existing target, re-keying tracks/colors/year_curves.
+
+        The rename keeps its colour and its cached year curve (if any) by
+        moving the colors/year_curves entries to the new key instead of
+        letting them be recomputed under it. Rejects a name already in
+        use, including 'Moon', which can never be a target name.
+
+        Returns (track, error_message). Leaves everything untouched on
+        error.
+        """
+        _new_name = _sanitize_name(str(new_name))
+        if not _new_name:
+            return None, "Enter a target name."
+        with self.lock:
+            if old_name not in self.tracks:
+                return None, f"'{old_name}' is not a known target."
+            if _new_name == old_name:
+                return self.tracks[old_name], None
+            if _new_name in self.tracks or _new_name == 'Moon':
+                return None, f"'{_new_name}' is already in the list."
+            _new_tracks = {}
+            for _n, _t in self.tracks.items():
+                if _n == old_name:
+                    _t['name'] = _new_name
+                    _new_tracks[_new_name] = _t
+                else:
+                    _new_tracks[_n] = _t
+            self.tracks = _new_tracks
+            if old_name in self.colors:
+                self.colors[_new_name] = self.colors.pop(old_name)
+            if old_name in self.year_curves:
+                self.year_curves[_new_name] = self.year_curves.pop(old_name)
+            return self.tracks[_new_name], None
+
     def ordered_tracks(self, names=None):
         """Tracks in insertion order (Moon last), optionally filtered."""
         _tracks = list(self.tracks.values())
@@ -210,11 +339,14 @@ class TrackRegistry:
     def year_series(self, names=None):
         """Cached per-target year curves, computed on first use.
 
-        Keyed by name and NEVER pruned -- exactly like self.colors: a
-        target's curve is a pure function of its coordinates and the site,
-        so it cannot go stale, and a target that is removed and re-added
-        gets its curve back for free instead of being recomputed. remove()
-        deliberately has no matching pop() for this cache.
+        Keyed by name and pruned only when it must be: a target's curve
+        is a pure function of its coordinates and the site, so removing
+        and re-adding a target (remove() deliberately has no matching
+        pop() for this cache) gets its curve back for free, but an
+        edited ra/dec (see recompute() callers) pops just that target's
+        entry, and a site change (see apply_site()) clears the whole
+        cache -- callers elsewhere must not assume an entry is
+        permanent.
 
         The Moon, and any track with no resolved coordinates, is skipped: a
         monthly sample of the Moon's peak altitude is synodic aliasing, not
@@ -237,6 +369,101 @@ class TrackRegistry:
                        color=self.colors.get(t['name']))
                   for t in _tracks]
         return _curves, self.walker.year_dates
+
+    def apply_site(self, site=None, lat=None, lon=None, elev=None,
+                   name=None):
+        """Move the whole session to a new observing site, in place.
+
+        lat and lon, given together, take precedence over site -- this
+        mirrors the Lat/Lon inputs overriding the site dropdown in the
+        web UI. Rebuilds the walker's location, observer, time frames and
+        night frames by calling cli.Skywalker's own set_location/
+        set_observer/set_time/set_night_frames (never duplicating their
+        logic), invalidates the year-view cache, and recomputes every
+        stored target's track at the new site from its saved coordinates.
+        Colours are preserved: self.colors is never touched here.
+
+        name, given only alongside lat/lon, becomes walker.sitename in
+        place of the "{lat} {lon}" fallback -- see
+        cli.Skywalker.set_location()'s own name parameter, which this
+        passes straight through and which does the actual stripping and
+        fallback. Ignored when site is given instead.
+
+        Returns (dropped_names, error_message). dropped_names lists any
+        target that no longer rises above the horizon at the new site --
+        it is removed from self.tracks, never left in a half-computed
+        state. On error, nothing is left changed: the lat/lon range check
+        runs before any attribute is mutated, and every walker attribute
+        touched afterwards is snapshotted first and restored if a later
+        step raises -- e.g. set_time()'s timezone lookup failing over
+        open ocean.
+        """
+        _walker = self.walker
+        with self.lock:
+            _use_latlon = lat is not None and lon is not None
+            if _use_latlon and not (-180. <= lon <= 360.):
+                return [], f"Longitude {lon} out of range (-180 to 360 deg)."
+
+            _snapshot = {_attr: getattr(_walker, _attr) for _attr in (
+                'location', 'sitename', 'observer', 'inithour', 'utcoffset',
+                'obs_time', 'delta_midnight', 'frame_time_overnight',
+                'moon', 'sunaltaz_time_overnight', 'moonaltaz_time_overnight',
+                'moon_brightness', 'year_frame', 'year_dates', 'year_shape',
+                'year_night_mask', 'year_local_times')}
+            try:
+                if _use_latlon:
+                    _walker.set_location(lat=lat, lon=lon, elev=elev,
+                                        name=name)
+                else:
+                    _walker.set_location(site=site)
+                _walker.set_observer()
+                _walker.set_time()
+                _walker.set_night_frames()
+            except Exception as exc:
+                for _attr, _val in _snapshot.items():
+                    setattr(_walker, _attr, _val)
+                return [], f"Could not apply site: {exc}"
+
+            # Committed past this point: force set_year_frames() to
+            # rebuild on next use, and drop every cached year curve --
+            # both are pure functions of coordinates AND site now.
+            _walker.year_frame = None
+            _walker.year_dates = None
+            _walker.year_shape = None
+            _walker.year_night_mask = None
+            _walker.year_local_times = None
+            self.year_curves = {}
+
+            self.local_times = (_walker.frame_time_overnight.obstime
+                                + _walker.utcoffset).datetime
+            self.night_mask = _walker.sunaltaz_time_overnight.alt.value < 0.
+            self.moon = {'name': 'Moon',
+                        'alt': _walker.moonaltaz_time_overnight.alt.value,
+                        'az': _walker.moonaltaz_time_overnight.az.value,
+                        'color': 'c', 'is_moon': True, 'has_block': False,
+                        'block_starts': 0., 'block_ends': 0.,
+                        'moon_distance': None, 'label_x': None,
+                        'label_y': None, 'label_color': None,
+                        'chart_alt': None, 'chart_az': None,
+                        'chart_hours': None, 'coords': None}
+
+            _dropped = []
+            _new_tracks = {}
+            for _name, _track in self.tracks.items():
+                _coords = _track.get('coords')
+                if _coords is None:
+                    continue
+                _blinit, _blocktime = plotdata.track_blinit_and_blocktime(
+                    _track)
+                _recomputed = _walker.compute_track(
+                    _name, _coords.ra.deg, _coords.dec.deg, _blinit,
+                    blocktime=_blocktime, color=self.colors.get(_name))
+                if _recomputed is None:
+                    _dropped.append(_name)
+                    continue
+                _new_tracks[_name] = _recomputed
+            self.tracks = _new_tracks
+            return _dropped, None
 
 
 def _resolve_target(registry, name, ra_text, dec_text, raunit):
@@ -312,6 +539,28 @@ def _apply_focus(fig, focus):
     return fig
 
 
+def _resolve_focus(active_cell, rows):
+    """active_cell's row_id, or None if it names no row currently in rows.
+
+    _view and _view_year both read active_cell.get('row_id') as the name
+    to focus on, but active_cell is client-side state that a rename, a
+    removal, or a target dropped by a site switch never updates or
+    clears -- it can go on naming a target that no longer exists. Left
+    unchecked, that stale name matches no trace in _apply_focus() (or no
+    row in _swatch_styles()), so every trace/annotation dims and the
+    whole figure looks broken. Treating a focus that names no current
+    row as "no focus" degrades to the correct, unfocused view instead of
+    a duplicate Output on sw-table.active_cell (which would collide with
+    _clear_highlight's) or a second writer next to the merged _mutate
+    callback.
+    """
+    if not active_cell:
+        return None
+    _focus = active_cell.get('row_id')
+    _names = {r['name'] for r in rows}
+    return _focus if _focus in _names else None
+
+
 _INPUT_STYLE = {'fontSize': '14px', 'padding': '5px 7px',
                 'height': '30px', 'boxSizing': 'border-box'}
 
@@ -350,6 +599,13 @@ def build_app(walker):
         if _err is not None:
             walker.logger.warning(f"Skipping {_row['NAME']}: {_err}")
 
+    # Computed once at startup: EarthLocation.get_site_names() hits
+    # astropy's (possibly network-backed) site registry, so the dropdown's
+    # option list is not refetched on every browser page load or callback.
+    _site_options = [{'label': _s, 'value': _s}
+                     for _s in sorted(set(EarthLocation.get_site_names()))
+                     if _s]
+
     def _build_figure(names, focus=None):
         _fig = htmlplot.build_figure(
             registry.ordered_tracks(names), registry.local_times,
@@ -364,7 +620,8 @@ def build_app(walker):
     def _serve_layout():
         _rows = registry.table_rows()
         return html.Div([
-            html.H3(f"Night starts: {walker.nightstarts} @ {walker.sitename}"),
+            html.H3(f"Night starts: {walker.nightstarts} @ {walker.sitename}",
+                   id='sw-title'),
             dcc.Loading(children=[
                 dcc.Graph(id='sw-graph', figure=_build_figure(None),
                           config={'displaylogo': False,
@@ -390,6 +647,32 @@ def build_app(walker):
                              style={'width': '100%', 'height': '380px'}),
                 ], type='default', delay_show=300),
             ], id='sw-year-wrap', style={'display': 'none'}),
+            html.Div([
+                html.Span('Observatory', style={'fontWeight': 'bold',
+                                                'fontSize': '13px',
+                                                'alignSelf': 'center'}),
+                _field(dcc, html, 'Site', dcc.Dropdown(
+                    id='sw-site-dropdown', options=_site_options,
+                    value=None, searchable=True, clearable=True,
+                    placeholder='Search known sites...',
+                    style={'width': '220px', 'fontSize': '13px'})),
+                _field(dcc, html, 'Lat', dcc.Input(
+                    id='sw-site-lat', type='number', placeholder='deg',
+                    style=_input_style('90px'))),
+                _field(dcc, html, 'Lon', dcc.Input(
+                    id='sw-site-lon', type='number', placeholder='deg',
+                    style=_input_style('90px'))),
+                _field(dcc, html, 'Elev', dcc.Input(
+                    id='sw-site-elev', type='number', placeholder='m',
+                    style=_input_style('90px'))),
+                _field(dcc, html, 'Name (optional)', dcc.Input(
+                    id='sw-site-name', type='text',
+                    placeholder='Display name', style=_input_style('160px'))),
+                html.Button('Apply site', id='sw-site-apply', n_clicks=0),
+            ], id='sw-site-row', style={'display': 'flex', 'gap': '8px',
+                                        'alignItems': 'flex-end',
+                                        'flexWrap': 'wrap',
+                                        'margin': '10px 0'}),
             html.Div([
                 _field(dcc, html, 'Name', dcc.Input(
                     id='sw-in-name', type='text', debounce=True,
@@ -456,12 +739,131 @@ def build_app(walker):
               update_title=None)
     app.layout = _serve_layout
 
+    # Both the site switch (Feature 1) and per-cell edits (Feature 2) need
+    # to write sw-table.data/selected_rows and sw-status -- the same
+    # Outputs the MUTATOR above already owns -- so both are folded into
+    # this one callback as two more ctx.triggered_id branches, rather than
+    # adding a second writer and needing allow_duplicate=True. sw-title is
+    # a new Output added to the same callback for the same reason: only
+    # the site-apply branch has anything to say about it, every other
+    # branch returns no_update for it.
+    #
+    # Editable-column edits arrive as Input('sw-table', 'data_timestamp'),
+    # which dash_table only bumps for a front-end (user) edit of the
+    # data prop -- never for a plain server-side Output write to data --
+    # so this callback's own writes to sw-table.data cannot re-trigger the
+    # 'sw-table' branch below and loop.
+    _EDIT_FIELDS = ('name', 'ra', 'dec', 'blinit', 'blockdur')
+
+    def _apply_cell_edit(old_row, field, new_value, selected):
+        _name = old_row['name']
+        if _name == 'Moon':
+            return (registry.table_rows(), selected,
+                   "The Moon row cannot be edited.", _ERR_STYLE, no_update,
+                   no_update)
+        _track = None
+        try:
+            if field == 'name':
+                _track, _err = registry.rename(_name, new_value)
+            elif field in ('ra', 'dec'):
+                # Parse only the field that actually changed; take the
+                # other one from the stored track in degrees. Re-parsing
+                # BOTH via _resolve_target would feed it old_row['ra']/
+                # ['dec'] -- plotdata.track_summary()'s display-formatted,
+                # unit-less sexagesimal strings -- back through
+                # coords.parse_ra(), which correctly refuses an
+                # un-suffixed sexagesimal RA as ambiguous unless raunit
+                # was explicitly set. That is the bug this avoids: the
+                # unedited field never needs parsing at all.
+                _old_track = registry.tracks[_name]
+                try:
+                    if field == 'ra':
+                        _ra_deg = coords.parse_ra(
+                            new_value, raunit=walker.raunit,
+                            context=f" for {_name}")
+                        _dec_deg = _old_track['coords'].dec.deg
+                    else:
+                        _ra_deg = _old_track['coords'].ra.deg
+                        _dec_deg = coords.parse_dec(new_value)
+                except ValueError as exc:
+                    _err = str(exc)
+                else:
+                    _blinit, _blocktime = plotdata.track_blinit_and_blocktime(
+                        _old_track)
+                    _track, _err = registry.recompute(
+                        _name, _ra_deg, _dec_deg, _blinit,
+                        blocktime=_blocktime)
+                    if _err is None:
+                        with registry.lock:
+                            registry.year_curves.pop(_name, None)
+            elif field == 'blinit':
+                _old_track = registry.tracks[_name]
+                _, _blocktime = plotdata.track_blinit_and_blocktime(
+                    _old_track)
+                try:
+                    _blinit = _format_blinit(new_value)
+                except Exception as exc:
+                    _err = f"Bad block start '{new_value}': {exc}"
+                else:
+                    _track, _err = registry.recompute(
+                        _name, _old_track['coords'].ra.deg,
+                        _old_track['coords'].dec.deg, _blinit,
+                        blocktime=_blocktime)
+            else:                                    # field == 'blockdur'
+                _old_track = registry.tracks[_name]
+                _blinit, _ = plotdata.track_blinit_and_blocktime(_old_track)
+                try:
+                    _seconds = _parse_blockdur(new_value)
+                except ValueError as exc:
+                    _err = str(exc)
+                else:
+                    _blocktime, _err = _resolve_blocktime(_blinit, None,
+                                                          _seconds)
+                    if _err is None:
+                        _track, _err = registry.recompute(
+                            _name, _old_track['coords'].ra.deg,
+                            _old_track['coords'].dec.deg, _blinit,
+                            blocktime=_blocktime)
+        except Exception as exc:            # pragma: no cover -- safety net
+            _track, _err = None, f"Bad edit to {_name}: {exc}"
+
+        if _err is not None:
+            return (registry.table_rows(), selected, _err, _ERR_STYLE,
+                   no_update, no_update)
+        return (registry.table_rows(), selected, f"Updated {_track['name']}.",
+               _OK_STYLE, no_update, no_update)
+
+    def _handle_cell_edit(rows, selected):
+        _canon = registry.table_rows()
+        if len(rows) != len(_canon):
+            # A row appeared/disappeared without going through the
+            # mutator above -- should not happen; resync defensively.
+            return (_canon, list(range(len(_canon))), '', _OK_STYLE,
+                   no_update, no_update)
+        for _old, _new in zip(_canon, rows):
+            for _field in _EDIT_FIELDS:
+                if _old.get(_field) != _new.get(_field):
+                    return _apply_cell_edit(_old, _field, _new[_field],
+                                            selected)
+        # No field actually differs (e.g. a cell was focused and blurred
+        # unchanged): '' is safe here, not no_update, because dash_table's
+        # installed async-table.js only stamps data_timestamp inside its
+        # own __setProps wrapper -- i.e. when the table's own front-end
+        # edit handling calls its outgoing setProps({data: ...}) to push
+        # a user edit up to Dash. A callback Output writing sw-table.data
+        # updates the prop top-down via React and never goes through that
+        # wrapper, so this callback's own writes cannot re-trigger this
+        # 'sw-table' branch and there is no risk of this '' clobbering a
+        # freshly-written "Updated X." message.
+        return rows, selected, '', _OK_STYLE, no_update, no_update
+
     @app.callback(
         Output('sw-table', 'data'),
         Output('sw-table', 'selected_rows'),
         Output('sw-status', 'children'),
         Output('sw-status', 'style'),
         Output('sw-in-name', 'value'),
+        Output('sw-title', 'children'),
         Input('sw-add', 'n_clicks'),
         Input('sw-remove', 'n_clicks'),
         Input('sw-all', 'n_clicks'),
@@ -469,6 +871,8 @@ def build_app(walker):
         Input('sw-invert', 'n_clicks'),
         Input('sw-in-name', 'n_submit'),
         Input('sw-in-dec', 'n_submit'),
+        Input('sw-site-apply', 'n_clicks'),
+        Input('sw-table', 'data_timestamp'),
         State('sw-table', 'data'),
         State('sw-table', 'selected_rows'),
         State('sw-in-name', 'value'),
@@ -477,9 +881,15 @@ def build_app(walker):
         State('sw-in-blinit', 'value'),
         State('sw-in-blockend', 'value'),
         State('sw-in-blocktime', 'value'),
+        State('sw-site-dropdown', 'value'),
+        State('sw-site-lat', 'value'),
+        State('sw-site-lon', 'value'),
+        State('sw-site-elev', 'value'),
+        State('sw-site-name', 'value'),
         prevent_initial_call=True)
-    def _mutate(_add, _remove, _all, _none, _invert, _sub1, _sub2,
-               rows, selected, name, ra, dec, blinit, blockend, blocktime):
+    def _mutate(_add, _remove, _all, _none, _invert, _sub1, _sub2, _apply,
+               _ts, rows, selected, name, ra, dec, blinit, blockend,
+               blocktime, site, lat, lon, elev, site_name):
         who = ctx.triggered_id
         rows = rows or []
         selected = selected or []
@@ -488,7 +898,7 @@ def build_app(walker):
             _ra_deg, _dec_deg, _name, _err = _resolve_target(
                 registry, name, ra, dec, walker.raunit)
             if _err is not None:
-                return rows, selected, _err, _ERR_STYLE, name
+                return rows, selected, _err, _ERR_STYLE, name, no_update
             _blinit = blinit.strip() if blinit and blinit.strip() \
                 else walker.time
             try:
@@ -496,20 +906,20 @@ def build_app(walker):
             except Exception as exc:
                 return (rows, selected,
                        f"Bad block start '{_blinit}': {exc}", _ERR_STYLE,
-                       name)
+                       name, no_update)
             _blocktime, _err = _resolve_blocktime(_blinit, blockend,
                                                   blocktime)
             if _err is not None:
-                return rows, selected, _err, _ERR_STYLE, name
+                return rows, selected, _err, _ERR_STYLE, name, no_update
             _track, _err = registry.add(_name, _ra_deg, _dec_deg, _blinit,
                                         blocktime=_blocktime)
             if _err is not None:
-                return rows, selected, _err, _ERR_STYLE, name
+                return rows, selected, _err, _ERR_STYLE, name, no_update
             _rows = registry.table_rows()
             _selected = list(range(len(_rows)))   # newly-added stays checked
             return (_rows, _selected,
                    f"Added {_track['name']} ({len(registry.tracks)} "
-                   "target(s)).", _OK_STYLE, '')
+                   "target(s)).", _OK_STYLE, '', no_update)
 
         if who == 'sw-remove':
             _names = [rows[i]['name'] for i in selected
@@ -517,18 +927,77 @@ def build_app(walker):
             registry.remove(_names)
             _rows = registry.table_rows()
             return (_rows, list(range(len(_rows))),
-                   f"Removed {len(_names)} target(s).", _OK_STYLE, no_update)
+                   f"Removed {len(_names)} target(s).", _OK_STYLE, no_update,
+                   no_update)
 
         if who == 'sw-all':
-            return rows, list(range(len(rows))), '', _OK_STYLE, no_update
+            return (rows, list(range(len(rows))), '', _OK_STYLE, no_update,
+                   no_update)
         if who == 'sw-none':
-            return rows, [], '', _OK_STYLE, no_update
+            return rows, [], '', _OK_STYLE, no_update, no_update
         if who == 'sw-invert':
             _sel = set(selected)
             return (rows, [i for i in range(len(rows)) if i not in _sel],
-                   '', _OK_STYLE, no_update)
+                   '', _OK_STYLE, no_update, no_update)
 
-        return rows, selected, '', _OK_STYLE, no_update
+        if who == 'sw-site-apply':
+            _dropped, _err = registry.apply_site(
+                site=site or None,
+                lat=lat if lat not in (None, '') else None,
+                lon=lon if lon not in (None, '') else None,
+                elev=elev if elev not in (None, '') else None,
+                name=site_name)
+            if _err is not None:
+                return rows, selected, _err, _ERR_STYLE, no_update, no_update
+            _rows = registry.table_rows()
+            _msg = f"Site set to {walker.sitename}."
+            if _dropped:
+                _msg += (" No longer observable, removed: "
+                        + ', '.join(_dropped) + '.')
+            _title = (f"Night starts: {walker.nightstarts} @ "
+                     f"{walker.sitename}")
+            return (_rows, list(range(len(_rows))), _msg, _OK_STYLE,
+                   no_update, _title)
+
+        if who == 'sw-table':
+            return _handle_cell_edit(rows, selected)
+
+        return rows, selected, '', _OK_STYLE, no_update, no_update
+
+    # Exclusivity between the two site-input modes: selecting a dropdown
+    # site clears Lat/Lon/Elev/Name, and typing a Lat/Lon/Elev value
+    # clears the dropdown. A single callback with every site control as
+    # both Input and Output -- Dash permits an Output that is also its
+    # own Input; it is a cycle SPLIT ACROSS two callbacks that Dash
+    # refuses at registration. The guard on the triggering control's own
+    # new value being empty is what makes this converge instead of
+    # oscillating: a dropdown pick clears lat/lon/elev, each of which
+    # refires this same callback with its own (now empty) value as the
+    # trigger, and the guard turns that refire into a no-op rather than a
+    # bounce that wipes the dropdown pick that just landed. Name is an
+    # Output only, never an Input, here -- typing a name must not clear
+    # the dropdown.
+    @app.callback(
+        Output('sw-site-dropdown', 'value'),
+        Output('sw-site-lat', 'value'),
+        Output('sw-site-lon', 'value'),
+        Output('sw-site-elev', 'value'),
+        Output('sw-site-name', 'value'),
+        Input('sw-site-dropdown', 'value'),
+        Input('sw-site-lat', 'value'),
+        Input('sw-site-lon', 'value'),
+        Input('sw-site-elev', 'value'),
+        prevent_initial_call=True)
+    def _enforce_site_exclusivity(site, lat, lon, elev):
+        who = ctx.triggered_id
+        _triggered_value = {'sw-site-dropdown': site, 'sw-site-lat': lat,
+                            'sw-site-lon': lon,
+                            'sw-site-elev': elev}[who]
+        if _triggered_value in (None, ''):
+            return no_update, no_update, no_update, no_update, no_update
+        if who == 'sw-site-dropdown':
+            return no_update, None, None, None, ''
+        return None, no_update, no_update, no_update, no_update
 
     @app.callback(
         Output('sw-graph', 'figure'),
@@ -541,7 +1010,7 @@ def build_app(walker):
         rows = rows or []
         selected = selected or []
         _names = [rows[i]['name'] for i in selected if i < len(rows)]
-        _focus = active_cell.get('row_id') if active_cell else None
+        _focus = _resolve_focus(active_cell, rows)
         _fig = _build_figure(_names, focus=_focus)
         _csv = plotdata.format_selection_csv(
             registry.ordered_tracks(_names))
@@ -576,7 +1045,7 @@ def build_app(walker):
         rows = rows or []
         selected = selected or []
         _names = [rows[i]['name'] for i in selected if i < len(rows)]
-        _focus = active_cell.get('row_id') if active_cell else None
+        _focus = _resolve_focus(active_cell, rows)
         _curves, _dates = registry.year_series(_names)
         if not _curves:
             return {}

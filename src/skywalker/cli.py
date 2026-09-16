@@ -254,9 +254,49 @@ class Skywalker:
         self.loglevel = args.loglevel
         self.logger = logger(self.logfile, self.loglevel)
 
-    def set_location(self):
-        """Set the location of the observer based on the provided parameters."""
-        if self.sitefile is not None:
+    def set_location(self, site=None, lat=None, lon=None, elev=None,
+                     name=None):
+        """Set the location of the observer based on the provided parameters.
+
+        Parameters
+        ----------
+        site : str, optional
+            Explicit site name from EarthLocation.get_site_names().
+            Overridden by lat/lon when both of those are given. Falls
+            back to self.site when None (the default).
+        lat, lon : float, optional
+            Explicit coordinates in degrees, given together. Checked
+            first, so they take precedence over site when both are not
+            None. Fall back to self.lat / self.lon when None (the
+            default).
+        elev : float, optional
+            Elevation in meters, paired with lat/lon. Falls back to
+            self.elev when None (the default).
+        name : str, optional
+            Display name for the site, used only when lat/lon are both
+            given. Stripped of surrounding whitespace; None, or blank
+            after stripping, falls back to the existing "{lat} {lon}"
+            form. Ignored otherwise -- site, --sitefile and self.site
+            already carry their own name.
+
+        Any of these arguments bypasses --sitefile, which main()'s
+        no-argument startup call still honours exactly as before this
+        method gained parameters.
+        """
+        if lat is not None and lon is not None:
+            _elev = elev if elev is not None else self.elev
+            self.location = EarthLocation(lat=lat * u.deg, lon=lon * u.deg,
+                                          height=_elev * u.m)
+            _name = (name or '').strip()
+            self.sitename = _name if _name else f"{lat} {lon}"
+        elif site is not None:
+            try:
+                self.location = EarthLocation.of_site(site)
+            except UnknownSiteException:
+                raise ValueError(
+                    f"Site '{site}' not found in the database.")
+            self.sitename = site
+        elif self.sitefile is not None:
             if not os.path.isfile(self.sitefile):
                 raise ValueError(f"File {self.sitefile} not found.")
             else:

@@ -152,6 +152,23 @@ def track_summary(track, local_times, night_mask):
            'airmass': _airmass_str, 'moondist': _moondist_str}
 
 
+def track_blinit_and_blocktime(track):
+    """A track's block-start string and block length in seconds.
+
+    Inverts the (block_starts, block_ends) hours pair that
+    cli.Skywalker.compute_track() stores back into the "HH:MM:SS" +
+    seconds form its own blinit/blocktime parameters take, so a track
+    already held in memory can be fed straight back into compute_track()
+    -- e.g. to recompute it at a new site, or after editing one of its
+    other fields -- without re-deriving the user's original input. A
+    track with no block returns ('00:00:00', 0.).
+    """
+    if not track.get('has_block'):
+        return '00:00:00', 0.
+    return (_hours_to_hhmm(track['block_starts']) + ':00',
+           (track['block_ends'] - track['block_starts']) * 3600.)
+
+
 def format_selection_csv(tracks):
     """Format tracks as a skywalker NAME,RA,DEC,BLINIT,BLOCKTIME CSV.
 
@@ -165,12 +182,7 @@ def format_selection_csv(tracks):
         _coords = _t.get('coords')
         if _t.get('is_moon') or _coords is None:
             continue
-        if _t.get('has_block'):
-            _blinit = _hours_to_hhmm(_t['block_starts']) + ':00'
-            _blocktime = (_t['block_ends'] - _t['block_starts']) * 3600.
-        else:
-            _blinit = '00:00:00'
-            _blocktime = 0.
+        _blinit, _blocktime = track_blinit_and_blocktime(_t)
         _lines.append('%s,%.6f,%.6f,%s,%.0f' % (
             _t['name'], _coords.ra.deg, _coords.dec.deg, _blinit,
             _blocktime))
