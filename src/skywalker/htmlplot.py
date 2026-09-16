@@ -9,11 +9,12 @@ only calling render()/build_figure() does, and the ImportError raised then
 points the user at how to install it.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import numpy as np
 
-from .plotdata import airmass_from_alt, mask_to_intervals, PALETTE as _PALETTE
+from .plotdata import (airmass_from_alt, astro_night_mask, mask_to_intervals,
+                       PALETTE as _PALETTE)
 
 _COMPASS_DEG = list(range(0, 360, 45))
 _COMPASS_LABELS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
@@ -119,8 +120,8 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
         ((sun_alt < 0.) & (sun_alt > -6.3), 'indigo', 0.8),
         ((sun_alt < -6.) & (sun_alt > -12.3), 'indigo', 0.9),
         ((sun_alt < -12.) & (sun_alt > -18.), 'indigo', 1.0),
-        ((moon_alt < 0.) & (sun_alt < -18.), 'black', 1.0),
-        ((moon_alt > 0.) & (sun_alt < -18.), 'midnightblue',
+        ((moon_alt < 0.) & astro_night_mask(sun_alt), 'black', 1.0),
+        ((moon_alt > 0.) & astro_night_mask(sun_alt), 'midnightblue',
          1. - moon_brightness),
     ]
     for _mask, _color, _alpha in _bands:
@@ -238,6 +239,143 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                              tickmode='array', tickvals=_COMPASS_DEG,
                              ticktext=_COMPASS_LABELS),
             radialaxis=dict(range=[1, 91], angle=-45))
+
+    return fig
+
+
+def build_year_figure(curves, dates, minalt, sitename, nightstarts,
+                      metric='alt'):
+    """Build the year-view plotly figure: one line per target, per month.
+
+    Pure reshaper, like build_figure(): it does no astronomy, only lays out
+    the per-month peak altitudes and usable hours that
+    cli.Skywalker.year_max_altitudes() has already computed, one line per
+    target.
+
+    Parameters:
+    -----------
+    curves : list of dict
+        One entry per target, each with 'name', 'color' (str or None, same
+        convention as a track's 'color'), 'peak_alt' (np.ndarray, shape
+        (n,), NaN for a month where the target is not observable during
+        astronomical night), 'peak_time' (list of str, length n, 'HH:MM' or
+        '—' where peak_alt is NaN) and 'hours_up' (np.ndarray, shape (n,)).
+    dates : list of datetime.date
+        One reference date per month, length n, aligned with every curve's
+        arrays.
+    minalt : float
+        Minimum safe telescope altitude in degrees.
+    sitename : str
+    nightstarts : str
+        Not used by this figure; kept so a caller can pass the same
+        argument tuple it builds for build_figure().
+    metric : str, optional
+        'alt' (default, and the only behaviour before this parameter
+        existed) plots peak_alt on the y axis: minalt is drawn as a red
+        dashed hline and the y axis is fixed to [0, 90]. 'hours' plots
+        hours_up instead: the minalt hline is dropped -- minalt is the
+        threshold hours_up was counted against, not a y value -- and the y
+        axis autoscales from zero (rangemode='tozero') instead of being
+        fixed, since the natural ceiling is the length of the night and
+        varies by site and season. Either way the hover shows both
+        peak_alt and hours_up; only which one drives the y axis, and which
+        one sits in customdata[1], swaps.
+
+    The y value in 'alt' mode is the peak altitude reached during
+    astronomical night (Sun below -18 deg, see plotdata.astro_night_mask()),
+    which is a strictly tighter cut than the 0 deg "Sun below the horizon"
+    one behind the "Peak alt" column of the web UI's table (track_summary()'s
+    night_mask). The first (tonight's) point on this curve can therefore
+    legitimately read slightly lower than that column's value.
+
+    Gap semantics differ between the two metrics -- this is deliberate, not
+    a bug to "fix" later. In 'alt' mode a non-observable month is NaN in
+    peak_alt and renders as a real gap (connectgaps=False keeps the line
+    from bridging it). In 'hours' mode that same month's hours_up is 0.0,
+    not NaN: a target that is up for zero usable hours that month is a
+    meaningful, honest zero, so it is plotted as a real point at y=0 and
+    must never be converted to a gap. The "never observable all year"
+    legend treatment (name suffix and visible='legendonly') keys off
+    peak_alt being all-NaN in both modes, so a target's legend entry does
+    not change meaning when the metric is flipped.
+    """
+    go, _ = _require_plotly()
+
+    fig = go.Figure()
+
+    _obj_index = 0
+    for _curve in curves:
+        _peak_alt = np.asarray(_curve['peak_alt'], dtype=float)
+        _hours_up = np.asarray(_curve['hours_up'], dtype=float)
+        _peak_time = _curve['peak_time']
+        _color = _track_color(_curve, _obj_index)
+        _obj_index += 1
+
+        _name = _curve['name']
+        _visible = True
+        if np.all(np.isnan(_peak_alt)):
+            _name = _name + ' (never observable)'
+            _visible = 'legendonly'
+
+        if metric == 'hours':
+            _y = _hours_up
+            _customdata = np.stack([_peak_time, _peak_alt], axis=-1)
+            _hover = ('%{y:.1f} h usable &middot; peak '
+                     '%{customdata[1]:.1f}&deg; at %{customdata[0]}')
+        else:
+            _y = _peak_alt
+            _customdata = np.stack([_peak_time, _hours_up], axis=-1)
+            _hover = ('%{y:.1f}&deg; at %{customdata[0]} &middot; '
+                     '%{customdata[1]:.1f} h usable')
+
+        fig.add_trace(go.Scatter(
+            x=dates, y=_y, mode='lines+markers', name=_name,
+            legendgroup=_name, connectgaps=False, visible=_visible,
+            line=dict(color=_color), marker=dict(color=_color),
+            customdata=_customdata, hovertemplate=_hover))
+
+    if metric != 'hours' and minalt > 1:
+        fig.add_hline(y=minalt, line=dict(color='red', dash='dash'))
+
+    # add_vline raises on a bare datetime.date on this plotly version (it
+    # tries to add an int offset to it internally); a full datetime is
+    # accepted, so promote dates[0] before handing it over, and fall back
+    # to an equivalent add_shape()/add_annotation() pair if some other
+    # installed version still rejects it.
+    _tonight = datetime.combine(dates[0], datetime.min.time())
+    try:
+        fig.add_vline(x=_tonight, line=dict(color='#888', dash='dot'),
+                     annotation_text='tonight')
+    except (TypeError, ValueError):
+        fig.add_shape(type='line', xref='x', yref='y domain',
+                     x0=_tonight, x1=_tonight, y0=0, y1=1,
+                     line=dict(color='#888', dash='dot'))
+        fig.add_annotation(x=_tonight, y=1, yref='y domain',
+                          yanchor='bottom', text='tonight', showarrow=False)
+
+    if metric == 'hours':
+        _title = ("Year view: hours usable during astronomical night "
+                 f"@ {sitename}")
+    else:
+        _title = ("Year view: peak altitude during astronomical night "
+                 f"@ {sitename}")
+    fig.update_layout(
+        title=_title,
+        uirevision='skywalker-year',
+        hovermode='x unified',
+        hoverlabel=dict(font_family='monospace', align='left',
+                        namelength=-1),
+        height=360, autosize=True, width=None,
+        margin=dict(l=60, r=40, t=50, b=40))
+
+    fig.update_xaxes(title='Date', tickformat='%b %Y', dtick='M1')
+    if metric == 'hours':
+        fig.update_yaxes(
+            title=f'Hours above {minalt:.0f} deg in astro. night',
+            rangemode='tozero')
+    else:
+        fig.update_yaxes(title='Peak altitude in astro. night [deg]',
+                         range=[0, 90])
 
     return fig
 

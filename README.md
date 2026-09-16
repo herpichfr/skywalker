@@ -175,6 +175,35 @@ than binding a public interface, since the app has no authentication in front of
 name lookups are cached to disk, so resolving names once online makes them work offline
 later.
 
+Year view
+----------
+
+The ``Show year view`` button under the plot opens a third panel: one line per target,
+altitude against date, sampled once a month for a full year starting at ``-ns``. Each point
+is the highest altitude that target reaches *while the Sun is below -18 deg* -- that is,
+during astronomical night -- so the shape of the line is the target's observing season. A
+month where the target never clears the horizon during astronomical night is a gap in the
+line, not a zero. Hovering a point also reports the local time of that peak and how many
+hours of that night the target spends above ``--minalt``.
+
+The panel has two y-axes to choose between, with a radio button above the plot. ``Peak
+altitude`` is the one described above. ``Hours usable`` instead plots how many hours of
+each month's astronomical night the target spends above ``--minalt``, which is usually the
+more honest answer to "which month is better": once a target culminates during the night,
+its peak altitude is simply its culmination altitude (``90 - |lat - dec|``), so that curve
+saturates and runs flat for months at a time while the usable hours keep changing. At OPD,
+NGC104 sits at 40.6 deg for five months running while its usable hours fall from 10.0 to
+3.0. Whichever axis you pick, hovering a point shows both numbers. Switching between them
+is instant -- both come from the same cached computation.
+
+The panel is computed on demand: nothing is calculated until you press the button, so it
+costs nothing if you only ever care about tonight. One thing to know when reading the
+altitude axis: its -18 deg cut is tighter than the Sun-below-the-horizon cut behind the
+table's ``Peak alt`` column, so the first point of a curve can legitimately read slightly
+lower than that column does for the same night. On the hours axis a month where the target
+is never usable is a real zero; on the altitude axis a month where it never clears the
+horizon during astronomical night is a gap in the line instead.
+
 ## License
 
 This code is licensed under the [GNU v3.0 License](LICENSE).

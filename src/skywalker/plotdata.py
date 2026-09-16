@@ -16,6 +16,19 @@ import numpy as np
 PALETTE = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
           '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
+ASTRO_NIGHT_ALT_DEG = -18.0
+
+
+def astro_night_mask(sun_alt):
+    """True where the Sun is below -18 deg: astronomical night.
+
+    This is a strictly tighter condition than the "Sun below the horizon"
+    (0 deg) cut used by track_summary()'s night_mask argument and by
+    cli.Skywalker.compute_track(): every sample where this mask is True is
+    also True under that 0 deg cut, but the converse does not hold.
+    """
+    return np.asarray(sun_alt, dtype=float) < ASTRO_NIGHT_ALT_DEG
+
 
 def palette_color(index):
     """Colour for the index-th object, cycling matplotlib's tab10 order."""

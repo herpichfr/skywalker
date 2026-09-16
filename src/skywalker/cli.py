@@ -2,6 +2,7 @@
 
 import os
 import sys
+import warnings
 import numpy as np
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz, get_body
 from astropy.coordinates.errors import UnknownSiteException
@@ -20,6 +21,7 @@ import pytz
 
 from .hover import TimeCursor, hover_is_possible
 from .coords import parse_ra, parse_dec, parse_ra_column
+from .plotdata import astro_night_mask
 
 
 def parse_args(argv=None):
@@ -202,6 +204,11 @@ class Skywalker:
         self.inithour = None
         self.delta_midnight = None
         self.frame_time_overnight = None
+        self.year_dates = None
+        self.year_frame = None
+        self.year_shape = None
+        self.year_night_mask = None
+        self.year_local_times = None
 
         self.moon = None
         self.moon_brightness = None
@@ -360,6 +367,125 @@ class Skywalker:
         moon_phase = np.arctan2(_sun.distance * np.sin(elongation),
                                 self.moon.distance - _sun.distance * np.cos(elongation))
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
+
+    def set_year_frames(self, n_months=13, samples=145):
+        """Build the shared time grid for the web UI's year-view panel.
+
+        For each of n_months consecutive month-spaced nights starting at
+        self.nightstarts, builds a 24 h window of samples epochs centred on
+        that night's local midnight, all folded into a single vectorised
+        AltAz frame. Requires set_location() and set_time() to have already
+        run, since it relies on self.location, self.utcoffset and
+        self.inithour.
+
+        Parameters:
+        -----------
+        n_months : int, optional
+            Number of consecutive month-spaced nights to sample. Default 13.
+        samples : int, optional
+            Number of epochs per night, spanning a 24 h window centred on
+            local midnight. Default 145.
+        """
+        if self.year_frame is not None:
+            return
+
+        # self.utcoffset was captured once for self.nightstarts (set_time(),
+        # ~line 304) and is reused here for every month: nights half a year
+        # away can end up centred up to an hour off of true local midnight
+        # where DST applies. This is harmless because the window is 24 h
+        # wide and we only take a maximum over it -- but this grid must
+        # therefore never be repurposed for anything that displays clock
+        # time to the user other than the coarse peak-time label computed in
+        # year_max_altitudes().
+        self.logger.debug(
+            f"Building year frame grid: n_months={n_months}, samples={samples}")
+
+        _dates = [pd.Timestamp(self.nightstarts) + pd.DateOffset(months=_i)
+                 for _i in range(n_months)]
+        self.year_dates = [_d.date() for _d in _dates]
+
+        _midnight_list = []
+        for _date in self.year_dates:
+            _night_ends = (Time(f"{_date}T{self.inithour}", format='isot')
+                          - self.utcoffset + .5 * u.day).strftime('%Y-%m-%d')
+            _midnight = Time(f"{_night_ends}T00:00:00",
+                             format='isot') - self.utcoffset
+            _midnight_list.append(_midnight)
+        _midnight_arr = Time(_midnight_list)
+
+        _offsets = np.linspace(-12, 12, samples) * u.hour
+        _flat_times = (_midnight_arr[:, None] + _offsets[None, :]).reshape(-1)
+
+        self.year_frame = AltAz(obstime=_flat_times, location=self.location)
+        _sun_alt_flat = get_body(
+            'sun', _flat_times).transform_to(self.year_frame).alt.value
+        _sun_alt_2d = _sun_alt_flat.reshape(n_months, samples)
+
+        self.year_night_mask = astro_night_mask(_sun_alt_2d)
+        self.year_local_times = (
+            _flat_times + self.utcoffset).datetime.reshape(n_months, samples)
+        self.year_shape = (n_months, samples)
+
+    def year_max_altitudes(self, obj_coords):
+        """Peak altitude, peak time and usable hours per month, per target.
+
+        Altitude is maximised over astronomical night (Sun below -18 deg),
+        which is tighter than the Sun-below-horizon (0 deg) cut used by
+        compute_track() and by the web table's "Peak alt" column, so the two
+        can legitimately disagree slightly for the same night -- that is not
+        a bug.
+
+        Parameters:
+        -----------
+        obj_coords : SkyCoord
+            Coordinates of one target, or of N targets batched into a single
+            SkyCoord by the caller (never looped in by this method).
+
+        Returns:
+        --------
+        list of dict, one per target, in the same order as obj_coords:
+            {'peak_alt': float ndarray (n_months,), NaN where not
+                         observable,
+             'peak_time': list[str] (n_months,), local 'HH:MM', '—' where
+                          peak_alt is NaN,
+             'hours_up': float ndarray (n_months,), hours above self.minalt
+                         during astronomical night}
+        """
+        self.set_year_frames()
+
+        _coords = obj_coords.reshape(1) if obj_coords.isscalar else obj_coords
+        _n = _coords.size
+        n_months, samples = self.year_shape
+
+        _alt = _coords.reshape(-1, 1).transform_to(
+            self.year_frame).alt.value.reshape(_n, n_months, samples)
+
+        _masked = np.where(self.year_night_mask, _alt, np.nan)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)
+            _peak = np.nanmax(_masked, axis=2)
+        _peak = np.where(_peak > 0., _peak, np.nan)
+
+        _step_h = 24. / (samples - 1)
+        _hours_up = (self.year_night_mask &
+                    (_alt > self.minalt)).sum(axis=2) * _step_h
+
+        _results = []
+        for _t in range(_n):
+            _peak_time = []
+            for _m in range(n_months):
+                if np.isnan(_peak[_t, _m]):
+                    _peak_time.append('—')
+                else:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('ignore', RuntimeWarning)
+                        _idx = np.nanargmax(_masked[_t, _m])
+                    _peak_time.append(
+                        self.year_local_times[_m, _idx].strftime('%H:%M'))
+            _results.append({'peak_alt': _peak[_t],
+                             'peak_time': _peak_time,
+                             'hours_up': _hours_up[_t]})
+        return _results
 
     def check_blockinit_format(self, blockinit=np.array([0])):
         """Check the format of the blockinit parameter and convert it to HH:MM:SS format."""

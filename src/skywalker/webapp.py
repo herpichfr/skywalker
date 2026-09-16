@@ -26,6 +26,7 @@ this process (single-observer tool -- see --web's help text).
 
 import threading
 
+import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.coordinates.name_resolve import NameResolveError
 
@@ -140,6 +141,11 @@ class TrackRegistry:
         self.walker = walker
         self.tracks = {}            # name -> track dict, insertion-ordered
         self.colors = {}            # name -> hex colour, never pruned
+        self.year_curves = {}       # name -> year curve dict, never pruned
+                                    # (see year_series()) -- a curve is a
+                                    # pure function of a target's
+                                    # coordinates and the site, so it can
+                                    # never go stale
         self.color_cursor = 0
         self.lock = threading.Lock()
         self.local_times = (walker.frame_time_overnight.obstime
@@ -200,6 +206,37 @@ class TrackRegistry:
         """One plotdata.track_summary() row per track, Moon included."""
         return [plotdata.track_summary(t, self.local_times, self.night_mask)
                for t in self.ordered_tracks()]
+
+    def year_series(self, names=None):
+        """Cached per-target year curves, computed on first use.
+
+        Keyed by name and NEVER pruned -- exactly like self.colors: a
+        target's curve is a pure function of its coordinates and the site,
+        so it cannot go stale, and a target that is removed and re-added
+        gets its curve back for free instead of being recomputed. remove()
+        deliberately has no matching pop() for this cache.
+
+        The Moon, and any track with no resolved coordinates, is skipped: a
+        monthly sample of the Moon's peak altitude is synodic aliasing, not
+        information.
+        """
+        self.walker.set_year_frames()
+        _tracks = [t for t in self.ordered_tracks(names)
+                  if not t.get('is_moon') and t.get('coords') is not None]
+        _missing = [t for t in _tracks if t['name'] not in self.year_curves]
+        if _missing:
+            _ra_deg = np.array([t['coords'].ra.deg for t in _missing])
+            _dec_deg = np.array([t['coords'].dec.deg for t in _missing])
+            _obj_coords = SkyCoord(ra=_ra_deg, dec=_dec_deg,
+                                   unit=('deg', 'deg'))
+            _results = self.walker.year_max_altitudes(_obj_coords)
+            with self.lock:
+                for _t, _res in zip(_missing, _results):
+                    self.year_curves[_t['name']] = _res
+        _curves = [dict(self.year_curves[t['name']], name=t['name'],
+                       color=self.colors.get(t['name']))
+                  for t in _tracks]
+        return _curves, self.walker.year_dates
 
 
 def _resolve_target(registry, name, ra_text, dec_text, raunit):
@@ -335,6 +372,24 @@ def build_app(walker):
                                                              'select2d']},
                           style={'width': '100%', 'height': '620px'}),
             ], type='default', delay_show=300),
+            html.Button('Show year view', id='sw-year-btn', n_clicks=0),
+            # Bare boolean -- safe in a dcc.Store. The module docstring's
+            # warning is about numpy arrays and datetimes silently mangled
+            # by plotly's JSON encoder; a plain bool round-trips exactly.
+            dcc.Store(id='sw-year-on', data=False),
+            html.Div([
+                dcc.RadioItems(
+                    id='sw-year-metric',
+                    options=[{'label': 'Peak altitude', 'value': 'alt'},
+                            {'label': 'Hours usable', 'value': 'hours'}],
+                    value='alt', inline=True,
+                    style={'fontSize': '13px', 'margin': '4px 0'}),
+                dcc.Loading(children=[
+                    dcc.Graph(id='sw-year', figure={},
+                             config={'displaylogo': False},
+                             style={'width': '100%', 'height': '380px'}),
+                ], type='default', delay_show=300),
+            ], id='sw-year-wrap', style={'display': 'none'}),
             html.Div([
                 _field(dcc, html, 'Name', dcc.Input(
                     id='sw-in-name', type='text', debounce=True,
@@ -491,6 +546,45 @@ def build_app(walker):
         _csv = plotdata.format_selection_csv(
             registry.ordered_tracks(_names))
         return _fig, _swatch_styles(rows, focus=_focus), _csv
+
+    @app.callback(
+        Output('sw-year-on', 'data'),
+        Output('sw-year-wrap', 'style'),
+        Output('sw-year-btn', 'children'),
+        Input('sw-year-btn', 'n_clicks'),
+        State('sw-year-on', 'data'),
+        prevent_initial_call=True)
+    def _toggle_year(_n, on):
+        on = not on
+        _style = {'display': 'block'} if on else {'display': 'none'}
+        _label = 'Hide year view' if on else 'Show year view'
+        return on, _style, _label
+
+    @app.callback(
+        Output('sw-year', 'figure'),
+        Input('sw-year-on', 'data'),
+        Input('sw-year-metric', 'value'),
+        Input('sw-table', 'data'),
+        Input('sw-table', 'selected_rows'),
+        Input('sw-table', 'active_cell'))
+    def _view_year(on, metric, rows, selected, active_cell):
+        # Lazy contract: while the panel is hidden nothing here is
+        # computed, so app startup and ordinary target-adding stay exactly
+        # as fast as they are today.
+        if not on:
+            return no_update
+        rows = rows or []
+        selected = selected or []
+        _names = [rows[i]['name'] for i in selected if i < len(rows)]
+        _focus = active_cell.get('row_id') if active_cell else None
+        _curves, _dates = registry.year_series(_names)
+        if not _curves:
+            return {}
+        _fig = htmlplot.build_year_figure(
+            _curves, _dates, walker.minalt, walker.sitename,
+            walker.nightstarts, metric=metric)
+        _fig.update_layout(width=None, autosize=True)
+        return _apply_focus(_fig, _focus)
 
     @app.callback(Output('sw-table', 'active_cell'),
                  Input('sw-unhighlight', 'n_clicks'),
