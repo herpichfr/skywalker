@@ -26,6 +26,7 @@ this process (single-observer tool -- see --web's help text).
 
 import re
 import threading
+from datetime import datetime
 
 import numpy as np
 from astropy.coordinates import EarthLocation, SkyCoord
@@ -202,12 +203,15 @@ class TrackRegistry:
         self.year_curves = {}       # name -> year curve dict
                                     # (see year_series()) -- a curve is a
                                     # pure function of a target's
-                                    # coordinates and the site, so it goes
-                                    # stale when either changes; a
-                                    # coordinate edit pops just that
-                                    # target's entry (see recompute()) and
-                                    # a site change clears the whole cache
-                                    # (see apply_site())
+                                    # coordinates, the site and the
+                                    # calendar year the grid is built
+                                    # for, so it goes stale when any of
+                                    # those changes; a coordinate edit
+                                    # pops just that target's entry (see
+                                    # recompute()), and a site change or
+                                    # a year switch (see apply_site() and
+                                    # year_series()) clears the whole
+                                    # cache
         self.color_cursor = 0
         self.lock = threading.Lock()
         self.local_times = (walker.frame_time_overnight.obstime
@@ -336,23 +340,38 @@ class TrackRegistry:
         return [plotdata.track_summary(t, self.local_times, self.night_mask)
                for t in self.ordered_tracks()]
 
-    def year_series(self, names=None):
+    def year_series(self, names=None, year=None):
         """Cached per-target year curves, computed on first use.
 
         Keyed by name and pruned only when it must be: a target's curve
-        is a pure function of its coordinates and the site, so removing
-        and re-adding a target (remove() deliberately has no matching
-        pop() for this cache) gets its curve back for free, but an
-        edited ra/dec (see recompute() callers) pops just that target's
-        entry, and a site change (see apply_site()) clears the whole
-        cache -- callers elsewhere must not assume an entry is
+        is a pure function of its coordinates, the site and the calendar
+        year the grid is built for, so removing and re-adding a target
+        (remove() deliberately has no matching pop() for this cache) gets
+        its curve back for free, but an edited ra/dec (see recompute()
+        callers) pops just that target's entry, and a site change (see
+        apply_site()) or a year switch (detected below by comparing
+        walker.year_of_frame before and after set_year_frames()) clears
+        the whole cache -- callers elsewhere must not assume an entry is
         permanent.
+
+        year, when given, is the calendar year requested by the
+        year-view date box; set_year_frames() rebuilds the grid for it
+        only when it differs from the year already built. None keeps
+        whatever year is already built, or the calendar year of
+        walker.nightstarts on first use.
 
         The Moon, and any track with no resolved coordinates, is skipped: a
         monthly sample of the Moon's peak altitude is synodic aliasing, not
         information.
         """
-        self.walker.set_year_frames()
+        _prev_year = self.walker.year_of_frame
+        self.walker.set_year_frames(year=year)
+        if self.walker.year_of_frame != _prev_year:
+            # The cache is a function of the year now too: every entry
+            # in it was computed against the grid for _prev_year and
+            # would silently plot against this year's axis.
+            with self.lock:
+                self.year_curves = {}
         _tracks = [t for t in self.ordered_tracks(names)
                   if not t.get('is_moon') and t.get('coords') is not None]
         _missing = [t for t in _tracks if t['name'] not in self.year_curves]
@@ -409,7 +428,7 @@ class TrackRegistry:
                 'obs_time', 'delta_midnight', 'frame_time_overnight',
                 'moon', 'sunaltaz_time_overnight', 'moonaltaz_time_overnight',
                 'moon_brightness', 'year_frame', 'year_dates', 'year_shape',
-                'year_night_mask', 'year_local_times')}
+                'year_night_mask', 'year_local_times', 'year_of_frame')}
             try:
                 if _use_latlon:
                     _walker.set_location(lat=lat, lon=lon, elev=elev,
@@ -426,12 +445,14 @@ class TrackRegistry:
 
             # Committed past this point: force set_year_frames() to
             # rebuild on next use, and drop every cached year curve --
-            # both are pure functions of coordinates AND site now.
+            # both are pure functions of coordinates AND site now (and,
+            # separately, of the calendar year -- see year_series()).
             _walker.year_frame = None
             _walker.year_dates = None
             _walker.year_shape = None
             _walker.year_night_mask = None
             _walker.year_local_times = None
+            _walker.year_of_frame = None
             self.year_curves = {}
 
             self.local_times = (_walker.frame_time_overnight.obstime
@@ -577,6 +598,25 @@ def _field(dcc, html, label, component):
                     style={'display': 'flex', 'flexDirection': 'column'})
 
 
+_YEAR_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _parse_year_date(text):
+    """Parse a year-view date box value as 'YYYY-MM-DD'.
+
+    Returns a datetime.date, or None if text is empty, malformed, or not
+    a real calendar date (e.g. '2024-02-30'). The caller treats None as
+    "ignore this input", never as a date to fall back on, so a bad edit
+    to the box can never propagate past the year-view figure.
+    """
+    if not text or not _YEAR_DATE_RE.match(text):
+        return None
+    try:
+        return datetime.strptime(text, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
 def build_app(walker):
     """Build the Dash app for walker's already-computed night.
 
@@ -635,12 +675,22 @@ def build_app(walker):
             # by plotly's JSON encoder; a plain bool round-trips exactly.
             dcc.Store(id='sw-year-on', data=False),
             html.Div([
-                dcc.RadioItems(
-                    id='sw-year-metric',
-                    options=[{'label': 'Peak altitude', 'value': 'alt'},
-                            {'label': 'Hours usable', 'value': 'hours'}],
-                    value='alt', inline=True,
-                    style={'fontSize': '13px', 'margin': '4px 0'}),
+                html.Div([
+                    dcc.RadioItems(
+                        id='sw-year-metric',
+                        options=[{'label': 'Peak altitude', 'value': 'alt'},
+                                {'label': 'Hours usable', 'value': 'hours'}],
+                        value='alt', inline=True,
+                        style={'fontSize': '13px', 'margin': '4px 0'}),
+                    # Local to the year view: never writes
+                    # walker.nightstarts, the nightly figure, or the page
+                    # title -- see _view_year()'s date-box handling.
+                    _field(dcc, html, 'Date', dcc.Input(
+                        id='sw-year-date', type='text', debounce=True,
+                        value=walker.nightstarts, placeholder='YYYY-MM-DD',
+                        style=_input_style('120px'))),
+                ], style={'display': 'flex', 'gap': '16px',
+                         'alignItems': 'flex-end', 'flexWrap': 'wrap'}),
                 dcc.Loading(children=[
                     dcc.Graph(id='sw-year', figure={},
                              config={'displaylogo': False},
@@ -1033,25 +1083,33 @@ def build_app(walker):
         Output('sw-year', 'figure'),
         Input('sw-year-on', 'data'),
         Input('sw-year-metric', 'value'),
+        Input('sw-year-date', 'value'),
         Input('sw-table', 'data'),
         Input('sw-table', 'selected_rows'),
         Input('sw-table', 'active_cell'))
-    def _view_year(on, metric, rows, selected, active_cell):
+    def _view_year(on, metric, year_date, rows, selected, active_cell):
         # Lazy contract: while the panel is hidden nothing here is
         # computed, so app startup and ordinary target-adding stay exactly
         # as fast as they are today.
         if not on:
             return no_update
+        # sw-year-date is local to the year view: it never writes
+        # walker.nightstarts, the nightly figure, or the page title.
+        # Malformed or cleared input is ignored -- keep whatever the
+        # panel is already showing rather than guessing a fallback date.
+        _marked = _parse_year_date(year_date)
+        if _marked is None:
+            return no_update
         rows = rows or []
         selected = selected or []
         _names = [rows[i]['name'] for i in selected if i < len(rows)]
         _focus = _resolve_focus(active_cell, rows)
-        _curves, _dates = registry.year_series(_names)
+        _curves, _dates = registry.year_series(_names, year=_marked.year)
         if not _curves:
             return {}
         _fig = htmlplot.build_year_figure(
             _curves, _dates, walker.minalt, walker.sitename,
-            walker.nightstarts, metric=metric)
+            _marked, metric=metric)
         _fig.update_layout(width=None, autosize=True)
         return _apply_focus(_fig, _focus)
 

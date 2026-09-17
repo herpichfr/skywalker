@@ -209,6 +209,7 @@ class Skywalker:
         self.year_shape = None
         self.year_night_mask = None
         self.year_local_times = None
+        self.year_of_frame = None
 
         self.moon = None
         self.moon_brightness = None
@@ -408,26 +409,40 @@ class Skywalker:
                                 self.moon.distance - _sun.distance * np.cos(elongation))
         self.moon_brightness = (1. + np.cos(moon_phase)) / 2.
 
-    def set_year_frames(self, n_months=13, samples=145):
+    def set_year_frames(self, year=None, samples=145):
         """Build the shared time grid for the web UI's year-view panel.
 
-        For each of n_months consecutive month-spaced nights starting at
-        self.nightstarts, builds a 24 h window of samples epochs centred on
-        that night's local midnight, all folded into a single vectorised
-        AltAz frame. Requires set_location() and set_time() to have already
-        run, since it relies on self.location, self.utcoffset and
-        self.inithour.
+        Builds one month-spaced night per calendar month of year -- the
+        1st of January through the 1st of December -- each a 24 h window
+        of samples epochs centred on that night's local midnight, all
+        folded into a single vectorised AltAz frame. Requires
+        set_location() and set_time() to have already run, since it
+        relies on self.location, self.utcoffset and self.inithour.
+
+        A call with year=None is a no-op once any grid has been built: it
+        keeps whatever year is already on self.year_dates instead of
+        forcing it back to the default, so year_max_altitudes()'s own
+        no-argument call cannot silently undo a grid this method already
+        built for a different year. Only an explicit year that differs
+        from self.year_of_frame triggers a rebuild.
 
         Parameters:
         -----------
-        n_months : int, optional
-            Number of consecutive month-spaced nights to sample. Default 13.
+        year : int, optional
+            Calendar year to build the grid for. None (the default) means
+            "the year already built, if any, else the calendar year of
+            self.nightstarts".
         samples : int, optional
             Number of epochs per night, spanning a 24 h window centred on
             local midnight. Default 145.
         """
-        if self.year_frame is not None:
+        if self.year_frame is not None and (
+                year is None or year == self.year_of_frame):
             return
+        if year is not None:
+            _year = year
+        else:
+            _year = pd.Timestamp(self.nightstarts).year
 
         # self.utcoffset was captured once for self.nightstarts (set_time(),
         # ~line 304) and is reused here for every month: nights half a year
@@ -438,11 +453,12 @@ class Skywalker:
         # time to the user other than the coarse peak-time label computed in
         # year_max_altitudes().
         self.logger.debug(
-            f"Building year frame grid: n_months={n_months}, samples={samples}")
+            f"Building year frame grid: year={_year}, samples={samples}")
 
-        _dates = [pd.Timestamp(self.nightstarts) + pd.DateOffset(months=_i)
-                 for _i in range(n_months)]
+        _dates = [pd.Timestamp(year=_year, month=_m, day=1)
+                 for _m in range(1, 13)]
         self.year_dates = [_d.date() for _d in _dates]
+        self.year_of_frame = _year
 
         _midnight_list = []
         for _date in self.year_dates:
@@ -459,12 +475,12 @@ class Skywalker:
         self.year_frame = AltAz(obstime=_flat_times, location=self.location)
         _sun_alt_flat = get_body(
             'sun', _flat_times).transform_to(self.year_frame).alt.value
-        _sun_alt_2d = _sun_alt_flat.reshape(n_months, samples)
+        _sun_alt_2d = _sun_alt_flat.reshape(12, samples)
 
         self.year_night_mask = astro_night_mask(_sun_alt_2d)
         self.year_local_times = (
-            _flat_times + self.utcoffset).datetime.reshape(n_months, samples)
-        self.year_shape = (n_months, samples)
+            _flat_times + self.utcoffset).datetime.reshape(12, samples)
+        self.year_shape = (12, samples)
 
     def year_max_altitudes(self, obj_coords):
         """Peak altitude, peak time and usable hours per month, per target.

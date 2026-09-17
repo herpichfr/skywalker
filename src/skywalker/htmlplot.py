@@ -243,7 +243,7 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
     return fig
 
 
-def build_year_figure(curves, dates, minalt, sitename, nightstarts,
+def build_year_figure(curves, dates, minalt, sitename, marked_date,
                       metric='alt'):
     """Build the year-view plotly figure: one line per target, per month.
 
@@ -266,9 +266,11 @@ def build_year_figure(curves, dates, minalt, sitename, nightstarts,
     minalt : float
         Minimum safe telescope altitude in degrees.
     sitename : str
-    nightstarts : str
-        Not used by this figure; kept so a caller can pass the same
-        argument tuple it builds for build_figure().
+    marked_date : datetime.date
+        The year-view date box's chosen date. Drawn as a vertical dotted
+        line across the figure and labelled with its ISO date, replacing
+        the old fixed line at dates[0] ("tonight"). May fall on any day,
+        not just a date already present in dates.
     metric : str, optional
         'alt' (default, and the only behaviour before this parameter
         existed) plots peak_alt on the y axis: minalt is drawn as a red
@@ -339,19 +341,20 @@ def build_year_figure(curves, dates, minalt, sitename, nightstarts,
 
     # add_vline raises on a bare datetime.date on this plotly version (it
     # tries to add an int offset to it internally); a full datetime is
-    # accepted, so promote dates[0] before handing it over, and fall back
-    # to an equivalent add_shape()/add_annotation() pair if some other
-    # installed version still rejects it.
-    _tonight = datetime.combine(dates[0], datetime.min.time())
+    # accepted, so promote marked_date before handing it over, and fall
+    # back to an equivalent add_shape()/add_annotation() pair if some
+    # other installed version still rejects it.
+    _marked_dt = datetime.combine(marked_date, datetime.min.time())
+    _marked_label = marked_date.strftime('%Y-%m-%d')
     try:
-        fig.add_vline(x=_tonight, line=dict(color='#888', dash='dot'),
-                     annotation_text='tonight')
+        fig.add_vline(x=_marked_dt, line=dict(color='#888', dash='dot'),
+                     annotation_text=_marked_label)
     except (TypeError, ValueError):
         fig.add_shape(type='line', xref='x', yref='y domain',
-                     x0=_tonight, x1=_tonight, y0=0, y1=1,
+                     x0=_marked_dt, x1=_marked_dt, y0=0, y1=1,
                      line=dict(color='#888', dash='dot'))
-        fig.add_annotation(x=_tonight, y=1, yref='y domain',
-                          yanchor='bottom', text='tonight', showarrow=False)
+        fig.add_annotation(x=_marked_dt, y=1, yref='y domain',
+                          yanchor='bottom', text=_marked_label, showarrow=False)
 
     if metric == 'hours':
         _title = ("Year view: hours usable during astronomical night "
@@ -361,7 +364,12 @@ def build_year_figure(curves, dates, minalt, sitename, nightstarts,
                  f"@ {sitename}")
     fig.update_layout(
         title=_title,
-        uirevision='skywalker-year',
+        # Keyed by year, not a bare constant: a metric switch or a
+        # target-selection change keeps the same key, so the user's
+        # zoom/pan survives those refreshes, but a year switch changes
+        # the key and resets it -- the old zoom range is almost
+        # certainly meaningless against a different year's data.
+        uirevision=f'skywalker-year-{dates[0].year}',
         hovermode='x unified',
         hoverlabel=dict(font_family='monospace', align='left',
                         namelength=-1),
