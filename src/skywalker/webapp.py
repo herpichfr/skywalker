@@ -486,6 +486,96 @@ class TrackRegistry:
             self.tracks = _new_tracks
             return _dropped, None
 
+    def apply_date(self, date_text):
+        """Move the whole session to a new night, in place.
+
+        Mirrors apply_site(): rebuilds the walker's time and night frames
+        by calling cli.Skywalker's own set_time()/set_night_frames()
+        (never duplicating their logic), invalidates the year-view cache,
+        and recomputes every stored target's track for the new night from
+        its saved coordinates. Colours are preserved: self.colors is
+        never touched here. Does NOT call set_location()/set_observer():
+        the site is unchanged, only the night is.
+
+        date_text is parsed with the same _parse_year_date() the
+        year-view date box already uses, so the two controls agree on
+        what counts as a valid date. A bad or empty date returns an
+        error message and changes nothing.
+
+        Returns (dropped_names, error_message). dropped_names lists any
+        target that no longer rises above the horizon on the new night --
+        it is removed from self.tracks, never left in a half-computed
+        state. On error, nothing is left changed: date_text is validated
+        before any attribute is mutated, and every walker attribute
+        touched afterwards is snapshotted first and restored if a later
+        step raises -- e.g. set_time()'s timezone lookup failing.
+        """
+        _walker = self.walker
+        with self.lock:
+            _date = _parse_year_date(date_text)
+            if _date is None:
+                return [], f"'{date_text}' is not a valid YYYY-MM-DD date."
+
+            _snapshot = {_attr: getattr(_walker, _attr) for _attr in (
+                'nightstarts', 'inithour', 'utcoffset', 'obs_time',
+                'delta_midnight', 'frame_time_overnight', 'moon',
+                'sunaltaz_time_overnight', 'moonaltaz_time_overnight',
+                'moon_brightness', 'year_frame', 'year_dates', 'year_shape',
+                'year_night_mask', 'year_local_times', 'year_of_frame')}
+            try:
+                _walker.nightstarts = _date.isoformat()
+                _walker.set_time()
+                _walker.set_night_frames()
+            except Exception as exc:
+                for _attr, _val in _snapshot.items():
+                    setattr(_walker, _attr, _val)
+                return [], f"Could not apply date: {exc}"
+
+            # Committed past this point: force set_year_frames() to
+            # rebuild on next use, and drop every cached year curve.
+            # set_year_frames() derives its per-month local midnights from
+            # walker.utcoffset and walker.inithour, both of which
+            # set_time() just recomputed from the new date above, so the
+            # existing grid and every curve on it are stale.
+            _walker.year_frame = None
+            _walker.year_dates = None
+            _walker.year_shape = None
+            _walker.year_night_mask = None
+            _walker.year_local_times = None
+            _walker.year_of_frame = None
+            self.year_curves = {}
+
+            self.local_times = (_walker.frame_time_overnight.obstime
+                                + _walker.utcoffset).datetime
+            self.night_mask = _walker.sunaltaz_time_overnight.alt.value < 0.
+            self.moon = {'name': 'Moon',
+                        'alt': _walker.moonaltaz_time_overnight.alt.value,
+                        'az': _walker.moonaltaz_time_overnight.az.value,
+                        'color': 'c', 'is_moon': True, 'has_block': False,
+                        'block_starts': 0., 'block_ends': 0.,
+                        'moon_distance': None, 'label_x': None,
+                        'label_y': None, 'label_color': None,
+                        'chart_alt': None, 'chart_az': None,
+                        'chart_hours': None, 'coords': None}
+
+            _dropped = []
+            _new_tracks = {}
+            for _name, _track in self.tracks.items():
+                _coords = _track.get('coords')
+                if _coords is None:
+                    continue
+                _blinit, _blocktime = plotdata.track_blinit_and_blocktime(
+                    _track)
+                _recomputed = _walker.compute_track(
+                    _name, _coords.ra.deg, _coords.dec.deg, _blinit,
+                    blocktime=_blocktime, color=self.colors.get(_name))
+                if _recomputed is None:
+                    _dropped.append(_name)
+                    continue
+                _new_tracks[_name] = _recomputed
+            self.tracks = _new_tracks
+            return _dropped, None
+
 
 def _resolve_target(registry, name, ra_text, dec_text, raunit):
     """Resolve a name/RA/Dec triple to (ra_deg, dec_deg, name, error).
@@ -675,6 +765,29 @@ def build_app(walker):
             # by plotly's JSON encoder; a plain bool round-trips exactly.
             dcc.Store(id='sw-year-on', data=False),
             html.Div([
+                html.Span('Night', style={'fontWeight': 'bold',
+                                          'fontSize': '13px',
+                                          'alignSelf': 'center'}),
+                # Always visible -- this box now drives the nightly
+                # figure too, not just the year view, so it can no
+                # longer live inside sw-year-wrap, which is hidden until
+                # "Show year view" is pressed. Debounced: every
+                # keystroke-commit still moves the year-view marker line
+                # live on its own, with no button press needed (see
+                # _view_year()'s Input on this same id). Recalculate is
+                # the only thing that ever writes this value into
+                # walker.nightstarts -- see the 'sw-date-apply' branch of
+                # _mutate() and TrackRegistry.apply_date().
+                _field(dcc, html, 'Date', dcc.Input(
+                    id='sw-year-date', type='text', debounce=True,
+                    value=walker.nightstarts, placeholder='YYYY-MM-DD',
+                    style=_input_style('120px'))),
+                html.Button('Recalculate', id='sw-date-apply', n_clicks=0),
+            ], id='sw-night-row', style={'display': 'flex', 'gap': '8px',
+                                        'alignItems': 'flex-end',
+                                        'flexWrap': 'wrap',
+                                        'margin': '10px 0'}),
+            html.Div([
                 html.Div([
                     dcc.RadioItems(
                         id='sw-year-metric',
@@ -682,13 +795,6 @@ def build_app(walker):
                                 {'label': 'Hours usable', 'value': 'hours'}],
                         value='alt', inline=True,
                         style={'fontSize': '13px', 'margin': '4px 0'}),
-                    # Local to the year view: never writes
-                    # walker.nightstarts, the nightly figure, or the page
-                    # title -- see _view_year()'s date-box handling.
-                    _field(dcc, html, 'Date', dcc.Input(
-                        id='sw-year-date', type='text', debounce=True,
-                        value=walker.nightstarts, placeholder='YYYY-MM-DD',
-                        style=_input_style('120px'))),
                 ], style={'display': 'flex', 'gap': '16px',
                          'alignItems': 'flex-end', 'flexWrap': 'wrap'}),
                 dcc.Loading(children=[
@@ -789,13 +895,14 @@ def build_app(walker):
               update_title=None)
     app.layout = _serve_layout
 
-    # Both the site switch (Feature 1) and per-cell edits (Feature 2) need
-    # to write sw-table.data/selected_rows and sw-status -- the same
-    # Outputs the MUTATOR above already owns -- so both are folded into
-    # this one callback as two more ctx.triggered_id branches, rather than
-    # adding a second writer and needing allow_duplicate=True. sw-title is
-    # a new Output added to the same callback for the same reason: only
-    # the site-apply branch has anything to say about it, every other
+    # The site switch (Feature 1), per-cell edits (Feature 2), and the
+    # Recalculate date button all need to write sw-table.data/
+    # selected_rows and sw-status -- the same Outputs the MUTATOR above
+    # already owns -- so all three are folded into this one callback as
+    # more ctx.triggered_id branches, rather than adding a second writer
+    # and needing allow_duplicate=True. sw-title is a new Output added to
+    # the same callback for the same reason: only the site-apply and
+    # date-apply branches have anything to say about it, every other
     # branch returns no_update for it.
     #
     # Editable-column edits arrive as Input('sw-table', 'data_timestamp'),
@@ -922,6 +1029,7 @@ def build_app(walker):
         Input('sw-in-name', 'n_submit'),
         Input('sw-in-dec', 'n_submit'),
         Input('sw-site-apply', 'n_clicks'),
+        Input('sw-date-apply', 'n_clicks'),
         Input('sw-table', 'data_timestamp'),
         State('sw-table', 'data'),
         State('sw-table', 'selected_rows'),
@@ -936,10 +1044,12 @@ def build_app(walker):
         State('sw-site-lon', 'value'),
         State('sw-site-elev', 'value'),
         State('sw-site-name', 'value'),
+        State('sw-year-date', 'value'),
         prevent_initial_call=True)
     def _mutate(_add, _remove, _all, _none, _invert, _sub1, _sub2, _apply,
-               _ts, rows, selected, name, ra, dec, blinit, blockend,
-               blocktime, site, lat, lon, elev, site_name):
+               _date_apply, _ts, rows, selected, name, ra, dec, blinit,
+               blockend, blocktime, site, lat, lon, elev, site_name,
+               date_text):
         who = ctx.triggered_id
         rows = rows or []
         selected = selected or []
@@ -1001,6 +1111,20 @@ def build_app(walker):
                 return rows, selected, _err, _ERR_STYLE, no_update, no_update
             _rows = registry.table_rows()
             _msg = f"Site set to {walker.sitename}."
+            if _dropped:
+                _msg += (" No longer observable, removed: "
+                        + ', '.join(_dropped) + '.')
+            _title = (f"Night starts: {walker.nightstarts} @ "
+                     f"{walker.sitename}")
+            return (_rows, list(range(len(_rows))), _msg, _OK_STYLE,
+                   no_update, _title)
+
+        if who == 'sw-date-apply':
+            _dropped, _err = registry.apply_date(date_text)
+            if _err is not None:
+                return rows, selected, _err, _ERR_STYLE, no_update, no_update
+            _rows = registry.table_rows()
+            _msg = f"Night set to {walker.nightstarts}."
             if _dropped:
                 _msg += (" No longer observable, removed: "
                         + ', '.join(_dropped) + '.')
