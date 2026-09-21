@@ -110,7 +110,13 @@ def track_summary(track, local_times, night_mask):
 
     Returns a dict with keys: id, name, swatch, ra, dec, blinit, blockdur,
     peakalt, peaktime, airmass, moondist -- all display strings except id,
-    name and swatch.
+    name and swatch. blockdur is '%dh%02d' when the block is a whole
+    number of hours and minutes and >= 1h (e.g. '1h30'), '%dm' when it is
+    whole minutes under 1h (e.g. '45m'), and total seconds with an 's'
+    suffix otherwise (e.g. '9015s'), so every value webapp._parse_blockdur()
+    accepts reads back to the identical number of seconds -- that
+    function inverts this formatting, and its docstring names the same
+    forms. A track with no block gets '—'.
     """
     _alt = np.asarray(track['alt'], dtype=float)
     _night_alt = np.where(np.asarray(night_mask, dtype=bool), _alt, np.nan)
@@ -135,8 +141,22 @@ def track_summary(track, local_times, night_mask):
 
     if track.get('has_block'):
         _dur_h = track['block_ends'] - track['block_starts']
-        _hh, _mm = int(_dur_h), int(round((_dur_h - int(_dur_h)) * 60.))
-        _blockdur_str = f'{_hh}h{_mm:02d}' if _hh else f'{_mm}m'
+        # block_ends is derived from a seconds -> astropy-hour -> back-to-
+        # seconds round trip, which leaves float noise (e.g.
+        # 5399.999999999996) that would otherwise push a duration into the
+        # wrong branch below or let _mm come out as 60. Rounding to the
+        # nearest whole second recovers the exact integer every value
+        # webapp._parse_blockdur() accepts is built from, which is what
+        # makes this formatting round-trip through it exactly.
+        _total_s = round(_dur_h * 3600.)
+        _hh, _rem_s = divmod(_total_s, 3600)
+        _mm, _ss = divmod(_rem_s, 60)
+        if _ss == 0 and _hh >= 1:
+            _blockdur_str = f'{_hh}h{_mm:02d}'
+        elif _ss == 0:
+            _blockdur_str = f'{_mm}m'
+        else:
+            _blockdur_str = f'{_total_s}s'
         _blinit_str = _hours_to_hhmm(track['block_starts'])
     else:
         _blockdur_str = '—'

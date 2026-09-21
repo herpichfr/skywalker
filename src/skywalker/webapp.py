@@ -160,32 +160,57 @@ def _sanitize_name(name):
 
 
 _BLOCKDUR_RE = re.compile(r'^(\d+)h(\d{1,2})$')
+_BLOCKDUR_HMS_RE = re.compile(
+    r'^(?:(?P<h>\d+(?:\.\d+)?)h)?'
+    r'(?:(?P<m>\d+(?:\.\d+)?)m)?'
+    r'(?:(?P<s>\d+(?:\.\d+)?)s)?$')
+_BLOCKDUR_FORMS = ("a bare number of hours (e.g. '2'), 'Xh', 'Xm', 'Xs', "
+                   "or a combination such as '1h30m', '1h30', or "
+                   "'2h30m15s'")
 
 
 def _parse_blockdur(text):
-    """Seconds from a Dur cell's "<H>h<MM>" / "<M>m" / "\u2014" display text.
+    """Seconds from a Dur cell's display text.
 
-    Inverts plotdata.track_summary()'s '%ih%02d'/'%im'/'\u2014' formatting,
-    so editing the Dur cell round-trips through the same convention the
-    table already displays. A bare number is read as seconds, matching
-    the Add-target form's "Block size [s]" field. Raises ValueError on
-    anything else.
+    Inverts plotdata.track_summary()'s blockdur formatting ('%dh%02d' /
+    '%dm' / '%ds' / '—'), so editing the Dur cell round-trips through the
+    same convention the table already displays. Accepts an 'h'/'m'/'s'
+    unit suffix, case-insensitive (e.g. '1h', '90M', '3600s'), the legacy
+    compound '<H>h<MM>' form ('1h30'), a full h+m+s combination
+    ('1h30m', '2h30m15s'), or a bare number -- read as HOURS, not
+    seconds, e.g. '2' -> 7200., matching how the table's own '<H>h<MM>'
+    display reads. Surrounding and internal whitespace is tolerated
+    ('90 m', ' 1h 30m '), and decimals are allowed on any single-unit
+    form ('1.5h', '1.5'). '—' or an empty string means "no block" and
+    returns 0. Raises ValueError, naming the accepted forms, on a
+    negative or otherwise unparseable value.
     """
     _text = str(text).strip()
-    if not _text or _text == '\u2014':
+    if not _text or _text == '—':
         return 0.
+    _compact = re.sub(r'\s+', '', _text).lower()
+
+    _legacy = _BLOCKDUR_RE.match(_compact)
+    if _legacy:
+        return int(_legacy.group(1)) * 3600. + int(_legacy.group(2)) * 60.
+
+    _hms = _BLOCKDUR_HMS_RE.match(_compact)
+    if _hms and any(_hms.groups()):
+        _h = float(_hms.group('h') or 0.)
+        _m = float(_hms.group('m') or 0.)
+        _s = float(_hms.group('s') or 0.)
+        return _h * 3600. + _m * 60. + _s
+
     try:
-        return float(_text)
+        _hours = float(_compact)
     except ValueError:
-        pass
-    _match = _BLOCKDUR_RE.match(_text)
-    if _match:
-        return int(_match.group(1)) * 3600. + int(_match.group(2)) * 60.
-    if _text.endswith('m') and _text[:-1].isdigit():
-        return float(_text[:-1]) * 60.
-    raise ValueError(
-        f"Bad block duration {_text!r}: use '1h30', '45m', or a number "
-        "of seconds.")
+        raise ValueError(
+            f"Bad block duration {_text!r}: use {_BLOCKDUR_FORMS}.")
+    if _hours < 0:
+        raise ValueError(
+            f"Bad block duration {_text!r}: duration cannot be negative; "
+            f"use {_BLOCKDUR_FORMS}.")
+    return _hours * 3600.
 
 
 class TrackRegistry:
