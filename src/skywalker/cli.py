@@ -123,9 +123,12 @@ def parse_args(argv=None):
                         of it, so prefer an SSH tunnel for remote access.")
     parser.add_argument("--web-port", type=int, default=8050,
                         help="TCP port for the web server. Default is 8050.")
-    parser.add_argument("--web-open", action="store_true",
-                        help="Open the web UI in the default browser once \
-                        the server is listening.")
+    parser.add_argument("--web-open", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="Open the web UI in a new tab of the default \
+                        browser once the server is listening, starting the \
+                        browser if it is not running. On by default; use \
+                        --no-web-open to disable.")
     parser.add_argument("--web-debug", action="store_true",
                         help="Enable the Dash/Werkzeug debugger. Refused \
                         unless --web-host is a loopback address, since the \
@@ -565,6 +568,67 @@ class Skywalker:
 
         return _blockinit
 
+    def parse_target_dataframe(self, df):
+        """Validate and default-fill a target DataFrame, then parse it.
+
+        Factored out of set_target_list()'s --file branch so the web UI's
+        Load CSV button (webapp.TrackRegistry.replace_from_dataframe(),
+        called from webapp._mutate()'s 'sw-csv-upload' branch) can apply
+        exactly the same rules to an uploaded CSV without duplicating
+        them: RA and DEC columns are required; NAME defaults to 'Obj1',
+        'Obj2', ... ; BLINIT defaults to self.time and otherwise is
+        normalised to 'HH:MM:SS' via check_blockinit_format() and
+        anchored to self.nightstarts, exactly as an explicit BLINIT
+        column always was; BLOCKTIME defaults to 0. RA is parsed with
+        coords.parse_ra_column() (self.raunit) and DEC with
+        coords.parse_dec() -- the same two calls set_target_list()
+        always made.
+
+        df is not mutated; a modified copy is returned. Raises
+        ValueError, naming the missing column(s), when RA or DEC (or
+        both) is absent. set_target_list() itself still checks this
+        first, to keep its own file-naming message, so its call here
+        never hits this branch; a caller with no file name of its own
+        (the web upload path) relies on it directly.
+
+        Returns a new DataFrame with NAME, RA (deg, float), DEC (deg,
+        float), BLINIT ('HH:MM:SS' str) and BLOCKTIME (float, seconds)
+        columns, row order preserved.
+        """
+        df = df.copy()
+        _missing = [c for c in ('RA', 'DEC') if c not in df.columns]
+        if _missing:
+            raise ValueError(
+                ' and '.join(_missing)
+                + (' columns' if len(_missing) > 1 else ' column')
+                + ' not found.')
+        if 'NAME' not in df.columns:
+            self.logger.warning(
+                "NAME column not found. Using Obj incremented by 1 as "
+                "names.")
+            df['NAME'] = ["Obj" + str(i) for i in range(1, len(df) + 1)]
+        if 'BLINIT' not in df.columns:
+            self.logger.warning(
+                "BLINIT column not found. Using time parameter as "
+                "BLINIT.")
+            df['BLINIT'] = [self.time] * len(df)
+        else:
+            df['BLINIT'] = self.check_blockinit_format(df['BLINIT'])
+            df['BLINIT'] = df['BLINIT'].apply(
+                lambda x: Time(self.nightstarts + "T" + x,
+                              format='isot').strftime('%H:%M:%S'))
+        if 'BLOCKTIME' not in df.columns:
+            self.logger.warning(
+                "BLOCKTIME column not found. Using 0 as BLOCKTIME.")
+            df['BLOCKTIME'] = [0] * len(df)
+        _ra_deg, _ra_warning = parse_ra_column(
+            df['RA'], raunit=self.raunit, names=df['NAME'])
+        if _ra_warning is not None:
+            self.logger.warning(_ra_warning)
+        df['RA'] = _ra_deg
+        df['DEC'] = np.array([parse_dec(v) for v in df['DEC']])
+        return df
+
     def set_target_list(self):
         """Set the target list based on the provided parameters."""
         if self.load_file:
@@ -583,32 +647,7 @@ class Skywalker:
             if 'RA' not in df.columns or 'DEC' not in df.columns:
                 raise ValueError(
                     f"RA and DEC columns not found in {self.file}.")
-            if 'NAME' not in df.columns:
-                self.logger.warning(
-                    f"NAME column not found in {self.file}. \
-                    Using Obj incremented by 1 as names.")
-                df['NAME'] = ["Obj" + str(i) for i in range(1, len(df) + 1)]
-            if 'BLINIT' not in df.columns:
-                self.logger.warning(
-                    f"BLINIT column not found in {self.file}. \
-                    Using time parameter as BLINIT.")
-                df['BLINIT'] = [self.time] * len(df)
-            else:
-                df['BLINIT'] = self.check_blockinit_format(df['BLINIT'])
-                df['BLINIT'] = df['BLINIT'].apply(
-                    lambda x: Time(self.nightstarts + "T" + x, format='isot').strftime('%H:%M:%S'))
-            if 'BLOCKTIME' not in df.columns:
-                self.logger.warning(
-                    f"BLOCKTIME column not found in {self.file}. \
-                    Using 0 as BLOCKTIME.")
-                df['BLOCKTIME'] = [0] * len(df)
-            _ra_deg, _ra_warning = parse_ra_column(
-                df['RA'], raunit=self.raunit, names=df['NAME'])
-            if _ra_warning is not None:
-                self.logger.warning(_ra_warning)
-            df['RA'] = _ra_deg
-            df['DEC'] = np.array([parse_dec(v) for v in df['DEC']])
-            self.target_list = df
+            self.target_list = self.parse_target_dataframe(df)
         elif self.object:
             if self.blockinit:
                 self.blockinit = self.check_blockinit_format(

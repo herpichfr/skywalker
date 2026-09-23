@@ -167,10 +167,6 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                          opacity=1., line_width=0,
                          layer='below', **_rc)
 
-    # minalt limit line.
-    if minalt > 1:
-        fig.add_hline(y=minalt, line=dict(color='red', dash='dash'), **_rc)
-
     _obj_index = 0
     for _track in tracks:
         _alt = np.asarray(_track['alt'], dtype=float)
@@ -223,12 +219,30 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                 font=dict(size=10, color=_css_color(_track['label_color'])),
                 name=_track['name'], **_rc)
 
+    # minalt limit line. Added only now, after the track loop above has
+    # added at least one go.Scatter trace to this subplot: plotly 7's
+    # add_hline(row=, col=) silently fails to append any shape at all --
+    # no exception, just a no-op -- when called against a make_subplots()
+    # panel that does not yet hold a trace (add_shape() has no such
+    # requirement, which is why the twilight/darkness bands above, added
+    # before any trace exists, render fine). This was a real bug: with
+    # make_skychart=True the red minalt line never appeared, silently,
+    # because it used to be added here before the loop. tracks is never
+    # empty in practice (ordered_tracks() always includes the Moon unless
+    # the caller explicitly filters it out), but a caller that manages to
+    # pass an empty tracks list will still lose the line -- not fixed
+    # here, since nothing in this codebase currently does that.
+    if minalt > 1:
+        fig.add_hline(y=minalt, line=dict(color='red', dash='dash'), **_rc)
+
     if make_skychart:
-        # The whole chart is tinted by the Moon's illuminated fraction, the
-        # same colour as the staralt panel's Moon-up night band, and like it
-        # does not follow the page theme; labels and gridlines pick light or
-        # dark ink to stay readable on it.
-        _sky = _over_white('midnightblue', 1. - moon_brightness)
+        # The whole chart is tinted by the Moon's illuminated fraction:
+        # black at alpha 1 - brightness over white, as the matplotlib
+        # skychart draws it, so a new Moon gives a black sky and a full
+        # one a white sky. Like the staralt bands it does not follow the
+        # page theme; labels and gridlines pick light or dark ink to stay
+        # readable on it.
+        _sky = _over_white('black', 1. - moon_brightness)
         _ink = '#e0e0e0' if _is_dark(_sky) else '#222222'
         _grid = ('rgba(255, 255, 255, 0.3)' if _is_dark(_sky)
                  else 'rgba(0, 0, 0, 0.2)')
@@ -350,7 +364,11 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
         fixed, since the natural ceiling is the length of the night and
         varies by site and season. Either way the hover shows both
         peak_alt and hours_up; only which one drives the y axis, and which
-        one sits in customdata[1], swaps.
+        one sits in customdata[1], swaps. The y axis's own uirevision (see
+        below) is keyed by metric as well as year, so switching between
+        'alt' and 'hours' always resets the y axis to its default
+        range/autorange instead of keeping a zoom taken under the other
+        metric's incompatible scale.
     dark : bool, optional
         Render for a dark browser theme: 'plotly_dark' template, fixed
         '#1e1e1e' paper/plot background, a lightened hover label, and a
@@ -443,11 +461,19 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
                        namelength=-1)
     _layout_kwargs = dict(
         title=_title,
-        # Keyed by year, not a bare constant: a metric switch or a
-        # target-selection change keeps the same key, so the user's
-        # zoom/pan survives those refreshes, but a year switch changes
-        # the key and resets it -- the old zoom range is almost
-        # certainly meaningless against a different year's data.
+        # Keyed by year, not a bare constant: this governs the x axis,
+        # the legend and per-trace visibility (legendonly toggles) --
+        # a target-selection or marked-date change keeps the same key,
+        # so those survive such a refresh, but a year switch changes
+        # the key and resets them, since the old state is almost
+        # certainly meaningless against a different year's data. The y
+        # axis does NOT use this key -- see its own uirevision below,
+        # which also resets on a metric switch; 'alt' and 'hours' have
+        # incompatible y scales, so replaying one metric's zoom onto
+        # the other silently produced a nonsensical axis. That was the
+        # bug: before this uirevision was added, the y axis inherited
+        # this same year-only key and kept a stale zoomed range across
+        # an alt<->hours switch.
         uirevision=f'skywalker-year-{dates[0].year}',
         hovermode='x unified',
         hoverlabel=_hoverlabel,
@@ -460,14 +486,26 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
                               plot_bgcolor='#1e1e1e')
     fig.update_layout(**_layout_kwargs)
 
+    # The y axis gets its own uirevision, keyed by year AND metric,
+    # separate from the figure-wide one above (year only): 'alt' and
+    # 'hours' have incompatible y scales (0-90 deg fixed range vs. an
+    # autoranged, site/season-dependent hour count), so a zoom taken in
+    # one metric must not be replayed onto the other's axis when the
+    # metric switch rebuilds this figure with the same top-level
+    # uirevision. Keeping it on the y axis only (not the shared
+    # uirevision, not the x axis) means a target-selection or
+    # marked-date change still keeps the user's zoom within one metric,
+    # exactly as before -- only crossing the alt<->hours boundary now
+    # forces the axis back to its default range/autorange.
+    _y_uirevision = f'skywalker-year-{dates[0].year}-{metric}'
     fig.update_xaxes(title='Date', tickformat='%b %Y', dtick='M1')
     if metric == 'hours':
         fig.update_yaxes(
             title=f'Hours above {minalt:.0f} deg in astro. night',
-            rangemode='tozero')
+            rangemode='tozero', uirevision=_y_uirevision)
     else:
         fig.update_yaxes(title='Peak altitude in astro. night [deg]',
-                         range=[0, 90])
+                         range=[0, 90], uirevision=_y_uirevision)
 
     return fig
 

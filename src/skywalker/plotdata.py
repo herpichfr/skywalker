@@ -94,7 +94,8 @@ def _hours_to_hhmm(hours):
     return '%02d:%02d' % (_hh, _mm)
 
 
-def track_summary(track, local_times, night_mask):
+def track_summary(track, local_times, night_mask, astro_mask=None,
+                  minalt=None):
     """One DataTable row's worth of numbers for a track.
 
     Parameters:
@@ -107,16 +108,26 @@ def track_summary(track, local_times, night_mask):
     night_mask : np.ndarray of bool
         True where the Sun is below the horizon; the peak is searched only
         here, since a daytime culmination is useless for planning.
+    astro_mask : np.ndarray of bool, optional
+        True where the Sun is below -18 deg (astronomical night; see
+        astro_night_mask()), aligned with track['alt']. Drives the
+        HoursObs column, using the same night definition and the same
+        (mask & alt > minalt).sum() * step_h computation as
+        cli.Skywalker.year_max_altitudes()'s hours_up, so the two agree
+        for the same date/target. None (the default) leaves HoursObs
+        as '—', same as a track with no resolved coordinates.
+    minalt : float, optional
+        Minimum usable altitude in degrees, paired with astro_mask.
 
     Returns a dict with keys: id, name, swatch, ra, dec, blinit, blockdur,
-    peakalt, peaktime, airmass, moondist -- all display strings except id,
-    name and swatch. blockdur is '%dh%02d' when the block is a whole
-    number of hours and minutes and >= 1h (e.g. '1h30'), '%dm' when it is
-    whole minutes under 1h (e.g. '45m'), and total seconds with an 's'
-    suffix otherwise (e.g. '9015s'), so every value webapp._parse_blockdur()
-    accepts reads back to the identical number of seconds -- that
-    function inverts this formatting, and its docstring names the same
-    forms. A track with no block gets '—'.
+    peakalt, peaktime, airmass, usablehours, moondist -- all display
+    strings except id, name and swatch. blockdur is '%dh%02d' when the
+    block is a whole number of hours and minutes and >= 1h (e.g. '1h30'),
+    '%dm' when it is whole minutes under 1h (e.g. '45m'), and total
+    seconds with an 's' suffix otherwise (e.g. '9015s'), so every value
+    webapp._parse_blockdur() accepts reads back to the identical number
+    of seconds -- that function inverts this formatting, and its
+    docstring names the same forms. A track with no block gets '—'.
     """
     _alt = np.asarray(track['alt'], dtype=float)
     _night_alt = np.where(np.asarray(night_mask, dtype=bool), _alt, np.nan)
@@ -165,11 +176,26 @@ def track_summary(track, local_times, night_mask):
     _moondist = track.get('moon_distance')
     _moondist_str = '%i' % _moondist if _moondist is not None else '—'
 
+    if (astro_mask is not None and minalt is not None
+            and _coords is not None):
+        # Same definition and formula as
+        # cli.Skywalker.year_max_altitudes()'s hours_up: astronomical
+        # night (Sun below -18 deg) AND alt above minalt, summed and
+        # scaled by the sample step in hours -- both grids are evenly
+        # spaced over a 24h window, so step_h = 24 / (n_samples - 1)
+        # holds for either one.
+        _step_h = 24. / (len(_alt) - 1)
+        _usable_mask = np.asarray(astro_mask, dtype=bool) & (_alt > minalt)
+        _usablehours_str = '%.1f' % (_usable_mask.sum() * _step_h)
+    else:
+        _usablehours_str = '—'
+
     return {'id': track['name'], 'name': track['name'],
            'swatch': track['color'], 'ra': _ra_str, 'dec': _dec_str,
            'blinit': _blinit_str, 'blockdur': _blockdur_str,
            'peakalt': _peakalt_str, 'peaktime': _peaktime_str,
-           'airmass': _airmass_str, 'moondist': _moondist_str}
+           'airmass': _airmass_str, 'usablehours': _usablehours_str,
+           'moondist': _moondist_str}
 
 
 def track_blinit_and_blocktime(track):

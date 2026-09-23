@@ -1,54 +1,78 @@
-# Handoff — page title, dark mode, and Moon-coloured sky
+# Handoff — CSV upload, min altitude, HoursObs, and web-UI polish
 
-Session of 2026-09-23, branch `dev`.
-Supersedes the previous handoff, which covered the Recalculate button and the Dur-cell units
-(committed as `ac1a9d6` and `bb8be20`). Its design notes that still hold are carried forward below.
+Session of 2026-09-23 (second part), branch `dev`.
+Supersedes the previous handoff, which covered the page title, dark mode and the Moon-coloured
+sky (committed as `bc5375e`). Its design notes that still hold are carried forward below.
 
 ## What was done
 
-**1. Browser tab title.** `Dash(title=...)` is now the fixed string
-`SkyWalker - Python observation planner tool` instead of `skywalker <date>`. The night and site
-still show in the on-page `sw-title` heading.
+**1. Load CSV.** A `Load CSV` button (`dcc.Upload`, id `sw-csv-upload`) replaces the table's
+targets with a file's, keeping the Moon row. Column rules are the CLI's `-f` rules, now shared:
+the NAME / BLINIT / BLOCKTIME defaulting and the RA/DEC parsing moved out of
+`set_target_list()` into `Skywalker.parse_target_dataframe()`, which both call. RA and DEC are
+required; a file missing either, or unreadable, or with no rows, is rejected with the reason in
+`sw-status` and the table is untouched. `TrackRegistry.replace_from_dataframe()` builds every
+track first and swaps only if at least one is usable. Per-row failures inside a valid file (a
+duplicate name, a target that never rises) are skipped and reported, as startup loading does.
 
-**2. `&middot;` rendered literally in the plotly hover panels.** plotly's text renderer decodes
-only a handful of HTML entities (`&deg;`, `&amp;`, `&lt;`, `&gt;`, `&nbsp;`, ...); `&middot;` is
-not one of them. Every hovertemplate in `htmlplot.py` now uses a literal `·` instead. `&deg;` is
-fine and was left alone.
+**2. Min altitude control.** A `Min alt [deg]` box and `Set` button on the Night row
+(`sw-minalt`, `sw-minalt-apply`), a `_mutate` branch, and `TrackRegistry.set_minalt()`. Accepts
+0 <= value < 90. It moves the staralt line, the skychart ring, the year view and the HoursObs
+column. A site switch keeps it: `apply_site()` / `set_location()` never touch `walker.minalt`.
 
-**3. The web UI follows the browser's `prefers-color-scheme`, live.** Two halves:
+**3. HoursObs column.** Hours of astronomical night (Sun below -18 deg) with the target above
+minalt, computed in `track_summary()` with the same mask and formula as
+`year_max_altitudes()`'s `hours_up`. `TrackRegistry.astro_night_mask` is kept alongside
+`night_mask` and recomputed in `__init__`, `apply_site()` and `apply_date()`. The Moon row
+shows `—`. The column id is `usablehours`; only the header says `HoursObs`.
 
-- *Page chrome by CSS.* New `src/skywalker/assets/skywalker.css` (Dash serves `assets/` next to
-  the module automatically; `pyproject.toml` gains `package-data` so non-editable installs ship
-  it) defines colour tokens on `:root` with dark overrides under the media query. Every colour
-  that used to be an inline literal in `webapp.py` (`_OK_STYLE`, `_ERR_STYLE`, the `_field` label,
-  the focus-row highlight, the DataTable header and cells) is now a `var(--...)` reference, so
-  Python holds no theme logic for the page and there is no flash on load.
-- *Figures by a flag.* Plotly cannot read CSS, so a `dcc.Store(id='sw-theme')` is filled by a
-  clientside callback from `matchMedia('(prefers-color-scheme: dark)')`, which also registers a
-  `change` listener that pushes updates via `dash_clientside.set_props`. `_view` and `_view_year`
-  take it as an Input and pass `dark=` to `htmlplot.build_figure()` / `build_year_figure()`,
-  which switch to `plotly_dark` with a `#1e1e1e` paper, a dark hover label, and lighter spike
-  and marker lines.
+**4. Table and heading polish.** A visible `SkyWalker - Python observation planner tool`
+heading (H2) above `sw-title`. The staralt figure's own plotly title is dropped in the web view
+(`_build_figure` sets `title=None`, top margin 30) because it duplicated `sw-title`;
+`--savehtml` keeps it. The Moon column header is `MoonDist` (id `moondist`). RA and Dec are
+fixed at 95 px.
 
-**4. The night sky no longer follows the theme.** First pass of item 3 left the twilight and
-night bands translucent, so the theme's plot background showed through them: on a dark page a
-bright-Moon night rendered near-black. The bands are now pre-blended over white
-(`_over_white()`) and drawn opaque, reproducing the matplotlib figure's colours in both themes.
-The Moon-up astronomical night is `midnightblue` at alpha `1 - moon_brightness`, so it is as pale
-as the Moon is bright. The polar skychart's whole background takes that same colour, with its
-labels and gridlines picking light or dark ink by luminance (`_is_dark()`), and it gains the
-matplotlib skychart's red below-`minalt` ring (a full-circle `go.Barpolar`, red at 0.7 over white).
+**5. Year view y axis.** "Hours usable" went wrong after zooming because the y axis shared
+the year-only `uirevision`, so a zoom taken under one metric was replayed onto the other's
+scale. The y axis now has its own key; see the carried-over note.
+
+**6. Red minalt line missing with `-sc`.** plotly's `add_hline(row=, col=)` skips a subplot
+that holds no trace yet, and the line was added before any track. It is now added after the
+track loop.
+
+**7. Skychart is black at new Moon.** Its background is now black at alpha
+`1 - moon_brightness` over white, as the matplotlib skychart draws it, instead of midnightblue.
+The staralt Moon-up band is still midnightblue.
+
+**8. `--web` opens the browser by default.** `--web-open` is now a `BooleanOptionalAction`
+defaulting to on, with `--no-web-open` to disable. `run_webapp()` calls
+`webbrowser.open_new_tab`, only in the parent process when Werkzeug's reloader is active
+(`WERKZEUG_RUN_MAIN`), and maps a wildcard bind (`0.0.0.0`, `::`) to `localhost`.
 
 ## Files changed
 
 | File | Change |
 |---|---|
-| `src/skywalker/assets/skywalker.css` | New. Colour tokens, dark overrides, `body`/`input`/`button`, and `--Dash-*` overrides for `dcc.Dropdown` |
-| `src/skywalker/webapp.py` | Title; inline colours → `var(--...)`; `sw-theme` Store and clientside callback; `theme` Input on `_view`/`_view_year`; `_build_figure(dark=)`; `_apply_focus` skips `meta='sw-fixed'` traces |
-| `src/skywalker/htmlplot.py` | `&middot;` → `·`; `dark=False` on both builders; `_over_white()`, `_rgb_css()`, `_is_dark()`; opaque night bands; Moon-coloured polar background and red minalt ring |
-| `pyproject.toml` | `[tool.setuptools.package-data] skywalker = ["assets/*.css"]` |
+| `src/skywalker/cli.py` | `parse_target_dataframe()` factored out of `set_target_list()`; `--web-open` on by default with `--no-web-open` |
+| `src/skywalker/plotdata.py` | `track_summary()` takes `astro_mask` / `minalt` and returns the HoursObs value |
+| `src/skywalker/htmlplot.py` | minalt line after the track loop; year-view y-axis `uirevision`; black skychart |
+| `src/skywalker/webapp.py` | heading; min-alt control; CSV upload; HoursObs / MoonDist columns; RA/Dec widths; no staralt title; `set_minalt()`, `replace_from_dataframe()`, `astro_night_mask`; `open_new_tab` |
 
 ## Design notes for whoever picks this up
+
+- **HoursObs and the year view can differ by about 0.1 h.** Same formula, different
+  sampling: the table uses the night's own 500-sample track, the year view 145 samples a
+  night. The table value is the more accurate one; do not "fix" it to match.
+- **`parse_target_dataframe()` is the one place CSV target columns are interpreted.** The
+  CLI's `-f` path and the web upload both go through it. The CLI keeps its own RA/DEC presence
+  check in `set_target_list()` only to keep its file-named error message.
+- **The minalt line depends on a trace existing first.** Anything that moves `add_hline()`
+  back above the track loop, or builds a figure with an empty `tracks` list, loses the line
+  silently. Today `ordered_tracks()` always includes the Moon, so it is not reachable.
+- **The CSV upload is a `_mutate` branch, like every other writer of `sw-table.data`.** Keep
+  it that way; see the single-writer note below.
+
+### Carried over from the previous handoffs (still true)
 
 - **`dark=False` must stay the default, and it only restyles the figure chrome.**
   `render()` / `write_html()` / every `--savehtml` path call the builders without it.
@@ -67,12 +91,6 @@ matplotlib skychart's red below-`minalt` ring (a full-circle `go.Barpolar`, red 
 - **The minalt ring is tagged `meta='sw-fixed'`** so `_apply_focus()` never dims it. Any other
   chart furniture added as a trace (rather than a shape) needs the same tag, or highlighting a
   target will dim it.
-- **The skychart and the Moon-up band use `midnightblue`;** the matplotlib skychart uses black.
-  At full Moon they look alike; at new Moon the web one is deep blue rather than black. This was
-  a choice, not an oversight — flip the one `_over_white('midnightblue', ...)` call in the
-  skychart block if a match is wanted.
-
-### Carried over from the previous handoffs (still true)
 
 - **`apply_date()` invalidates the year grid and the curve cache.** `set_year_frames()` derives
   its per-month local midnights from `walker.utcoffset` and `walker.inithour`, both of which
@@ -109,8 +127,10 @@ matplotlib skychart's red below-`minalt` ring (a full-circle `go.Barpolar`, red 
 - **The year-curve cache is a function of the calendar year**, on top of coordinates and site.
   It is keyed by target name alone, so a year switch that does not clear it plots the old
   year's curves against the new axis, silently and plausibly.
-- **`uirevision` is keyed by year, not a constant**, so a metric switch keeps the user's zoom
-  and a year switch resets it.
+- **The year view's `uirevision` is two-tier.** The figure-wide key is the year, so x zoom,
+  legend state and trace visibility survive a target or marked-date change and reset on a year
+  switch. The y axis has its own key, year *and* metric, so a metric switch always resets it:
+  `alt` (fixed 0-90) and `hours` (autorange) have incompatible scales.
 - **Exactly one callback writes `sw-table.data` / `selected_rows` / `sw-status` / `sw-title`.**
   The site switch, per-cell edits and now the Recalculate button are all branches of `_mutate`
   rather than additional writers. Do not reach for `allow_duplicate`.
@@ -123,29 +143,34 @@ matplotlib skychart's red below-`minalt` ring (a full-circle `go.Barpolar`, red 
 
 ## Verified
 
-Against a live `--web` server on `examples/example_file.csv` (`-sc`), by fetching the layout
-and posting to `/_dash-update-component` directly:
+Against a live `--web` server on `examples/example_file.csv` (`-sc`), driving
+`/_dash-update-component` directly:
 
-- The page `<title>` is the new string; `assets/skywalker.css` is linked and served with 200.
-- `sw-theme.data` is registered as a clientside callback on `sw-theme.id`, and is an Input of
-  both the `sw-graph` and `sw-year` figure callbacks.
-- `theme='light'` returns the default template with no `paper_bgcolor`; `theme='dark'` returns
-  `plotly_dark` with `paper_bgcolor='#1e1e1e'` and a `#2a2a2a` hover label.
-- The night-band shapes are identical and all opacity 1 in both themes; on that ~94 % Moon night
-  the Moon-up band and the polar background are both `rgb(238, 238, 245)`.
-- The red ring is `rgb(255, 77, 77)` from `base=91-minalt` over `r=minalt` (10 deg), and keeps full
-  opacity while a target is focused.
+- The layout has the H2 heading, a single `Night starts` string, columns ending
+  `Best X, HoursObs, MoonDist`, and 95 px RA/Dec widths; the staralt figure has no title.
+- HoursObs at minalt 10: EG274 3.8, NGC104 9.1, NGC253 9.1. `Set` to 30: 1.9 / 9.1 / 8.4,
+  with the staralt line at 30 and the skychart ring at base 61, r 30. 95 is rejected with the
+  table unchanged, and 30 survives a switch to Cerro Paranal.
+- A CSV with only NAME and RA returns `bad.csv: DEC column not found.` with the table
+  unchanged. A NAME,RA,DEC file replaces the rows, keeps the Moon, and selects all.
+- The year view's y `uirevision` is `skywalker-year-<year>-alt` / `-hours`, while the layout
+  key stays `skywalker-year-<year>`.
+- Sky colour: `rgb(0, 0, 0)` at 0 % illumination, mid grey at 50 %, white at 100 %.
+- `parse_args(['--web'])` gives `web_open=True`, `['--web', '--no-web-open']` gives `False`.
+  With `webbrowser.open_new_tab` stubbed, a real `main()` run on `--web-host 0.0.0.0` called it
+  once with `http://localhost:8783/`.
 
-**Not verified:** no visual check in a browser beyond the user's report that the theme switch
-works. That night had no Moon-down stretch, so the opaque black band and the light-ink skychart
-branch on a dark-Moon night were not seen live; pick a date near new Moon to check them. No
-automated test suite exists, so none of this is a regression test.
+**Not verified:** no browser check of any of this — the zoom behaviour itself, the new controls
+in dark mode, a real browser tab opening. A CSV that includes BLINIT / BLOCKTIME columns was not
+uploaded. No automated test suite exists.
 
 ## TODO
 
-- Unify the Add-target form's "Block size [s]" field with the Dur cell's unit parsing, so `2`
-  means the same thing in both. See the design note above.
-- `TODO.md` still lists "Add individual cell editing to the target table", which was delivered
-  in `81b5c12`. Prune it next time that file is touched.
-- Uncommitted, not part of this session's commit: the table column rename `Block` → `ObsStart`
-  in `webapp.py`, and the matplotlib hover's Moon `illum. NN%` readout in `cli.py` / `hover.py`.
+- If "Hours usable" still misbehaves *without* a metric switch, the likely cause is that an x
+  zoom never rescales y to the visible data; that needs a relayout callback.
+- Unify the Add-target form's "Block size [s]" field with the Dur cell's unit parsing.
+- `TODO.md` still lists "Add individual cell editing to the target table", delivered in
+  `81b5c12`. Prune it next time that file is touched.
+- Uncommitted, not part of this session's commits: the table column rename `Block` →
+  `ObsStart` in `webapp.py`, and the matplotlib hover's Moon `illum. NN%` readout in
+  `cli.py` / `hover.py`.

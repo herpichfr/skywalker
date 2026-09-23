@@ -24,11 +24,15 @@ round-trip. The registry is shared by every browser tab that connects to
 this process (single-observer tool -- see --web's help text).
 """
 
+import base64
+import io
+import os
 import re
 import threading
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.coordinates.name_resolve import NameResolveError
 
@@ -45,7 +49,8 @@ _COLUMNS = [
     {'name': 'Peak alt', 'id': 'peakalt'},
     {'name': 'at', 'id': 'peaktime'},
     {'name': 'Best X', 'id': 'airmass'},
-    {'name': 'Moon', 'id': 'moondist'},
+    {'name': 'HoursObs', 'id': 'usablehours'},
+    {'name': 'MoonDist', 'id': 'moondist'},
 ]
 
 _OK_STYLE = {'color': 'var(--ok)', 'minHeight': '1.4em', 'fontSize': '13px'}
@@ -242,6 +247,15 @@ class TrackRegistry:
         self.local_times = (walker.frame_time_overnight.obstime
                             + walker.utcoffset).datetime
         self.night_mask = walker.sunaltaz_time_overnight.alt.value < 0.
+        # Astronomical night (Sun below -18 deg), not the 0 deg cut
+        # above: HoursObs (plotdata.track_summary()) needs this
+        # tighter definition to agree with the year view's hours_up
+        # (cli.Skywalker.year_max_altitudes()), which uses the same
+        # cut. Recomputed alongside self.night_mask everywhere that
+        # attribute is (apply_site(), apply_date()), for the same
+        # reason: both are pure functions of the night's Sun track.
+        self.astro_night_mask = plotdata.astro_night_mask(
+            walker.sunaltaz_time_overnight.alt.value)
         self.moon = {'name': 'Moon',
                      'alt': walker.moonaltaz_time_overnight.alt.value,
                      'az': walker.moonaltaz_time_overnight.az.value,
@@ -362,7 +376,10 @@ class TrackRegistry:
 
     def table_rows(self):
         """One plotdata.track_summary() row per track, Moon included."""
-        return [plotdata.track_summary(t, self.local_times, self.night_mask)
+        return [plotdata.track_summary(
+                   t, self.local_times, self.night_mask,
+                   astro_mask=self.astro_night_mask,
+                   minalt=self.walker.minalt)
                for t in self.ordered_tracks()]
 
     def year_series(self, names=None, year=None):
@@ -483,6 +500,8 @@ class TrackRegistry:
             self.local_times = (_walker.frame_time_overnight.obstime
                                 + _walker.utcoffset).datetime
             self.night_mask = _walker.sunaltaz_time_overnight.alt.value < 0.
+            self.astro_night_mask = plotdata.astro_night_mask(
+                _walker.sunaltaz_time_overnight.alt.value)
             self.moon = {'name': 'Moon',
                         'alt': _walker.moonaltaz_time_overnight.alt.value,
                         'az': _walker.moonaltaz_time_overnight.az.value,
@@ -573,6 +592,8 @@ class TrackRegistry:
             self.local_times = (_walker.frame_time_overnight.obstime
                                 + _walker.utcoffset).datetime
             self.night_mask = _walker.sunaltaz_time_overnight.alt.value < 0.
+            self.astro_night_mask = plotdata.astro_night_mask(
+                _walker.sunaltaz_time_overnight.alt.value)
             self.moon = {'name': 'Moon',
                         'alt': _walker.moonaltaz_time_overnight.alt.value,
                         'az': _walker.moonaltaz_time_overnight.az.value,
@@ -600,6 +621,99 @@ class TrackRegistry:
                 _new_tracks[_name] = _recomputed
             self.tracks = _new_tracks
             return _dropped, None
+
+    def set_minalt(self, minalt):
+        """Set the session's minimum usable altitude, in place.
+
+        minalt is a plain float attribute on the walker
+        (cli.Skywalker.minalt); neither set_location() nor
+        apply_site() ever touches it, so it already survives a site
+        switch on its own -- this method exists for the invalidation,
+        not to protect the attribute itself. Every figure that reads
+        walker.minalt (the staralt hline, the skychart's red ring, both
+        via _build_figure()) picks the new value up on its next redraw
+        with no further action, since they read it live rather than
+        caching it.
+
+        Invalidates the year-curve cache: year_max_altitudes()'s
+        hours_up is computed against self.walker.minalt (see cli.py),
+        so every cached curve's hours_up goes stale the moment minalt
+        changes, even though peak_alt does not depend on it -- the
+        cache holds both together, so the whole thing is cleared, not
+        pruned in place, same as apply_site()/apply_date() do for the
+        same reason (a different input going stale).
+
+        Does not touch self.tracks: minalt gates display (the hline,
+        the ring) and the HoursObs column, not which targets are
+        observable enough to be listed.
+        """
+        with self.lock:
+            self.walker.minalt = minalt
+            self.year_curves = {}
+
+    def replace_from_dataframe(self, df):
+        """Atomically replace every stored target with df's rows.
+
+        df must already be validated and defaulted by
+        cli.Skywalker.parse_target_dataframe() -- NAME/RA/DEC/BLINIT/
+        BLOCKTIME columns all present, RA/DEC already parsed to
+        degrees, BLINIT already 'HH:MM:SS'. This method only turns each
+        row into a track and swaps them in; it does no CSV or column
+        validation of its own.
+
+        Atomic: every row is computed into a scratch dict first, and
+        self.tracks is only replaced once every row has been attempted
+        -- a row that fails (an invalid/duplicate name, or
+        walker.compute_track() returning None because the target never
+        rises above the horizon) is merely skipped, exactly as the
+        startup CSV load already does in build_app(), and never leaves
+        the table half-replaced. If nothing in df is usable, self.tracks
+        is left completely untouched and an error is returned.
+
+        Colours: a name already known (already in self.colors, e.g.
+        re-uploading the same file, or a name that survives the
+        replace) keeps that colour; every other name gets the next
+        colour off the palette cursor via self._next_color(), same as
+        add() -- "fresh palette colours" for whatever in df is actually
+        new. The Moon row is untouched; it is not part of self.tracks.
+
+        A target present before the call but absent from the new
+        self.tracks has its cached year curve dropped -- year_series()
+        only prunes an entry on a coordinate edit or a site/year
+        change, never on its own just because a target left the table.
+
+        Returns (n_loaded, skipped_messages, error_message). On the
+        "nothing usable" failure, n_loaded is 0 and error_message names
+        it; skipped_messages still lists why each row was rejected.
+        """
+        with self.lock:
+            _new_tracks = {}
+            _skipped = []
+            for _idx in df.index:
+                _row = df.loc[_idx]
+                _name = _sanitize_name(str(_row['NAME']))
+                if not _name or _name == 'Moon':
+                    _skipped.append(f"'{_row['NAME']}': invalid name.")
+                    continue
+                if _name in _new_tracks:
+                    _skipped.append(f"'{_name}': duplicate name.")
+                    continue
+                _color = self._next_color(_name)
+                _track = self.walker.compute_track(
+                    _name, _row['RA'], _row['DEC'], _row['BLINIT'],
+                    blocktime=_row['BLOCKTIME'], color=_color)
+                if _track is None:
+                    _skipped.append(
+                        f"'{_name}': never rises above the horizon.")
+                    continue
+                _new_tracks[_name] = _track
+            if not _new_tracks:
+                return 0, _skipped, "No usable targets in the CSV."
+            _removed = set(self.tracks) - set(_new_tracks)
+            self.tracks = _new_tracks
+            for _name in _removed:
+                self.year_curves.pop(_name, None)
+            return len(_new_tracks), _skipped, None
 
 
 def _resolve_target(registry, name, ra_text, dec_text, raunit):
@@ -774,12 +888,17 @@ def build_app(walker):
             walker.moon_brightness.value, walker.minalt,
             int(walker.utcoffset.value), walker.sitename, walker.nightstarts,
             make_skychart=walker.make_skychart, dark=dark)
-        _fig.update_layout(width=None, autosize=True)
+        # No figure title here: the page's sw-title heading directly
+        # above the graph already says the same thing, and is the one
+        # the site/date callbacks keep current. --savehtml keeps its own.
+        _fig.update_layout(width=None, autosize=True, title=None,
+                           margin=dict(t=30))
         return _apply_focus(_fig, focus)
 
     def _serve_layout():
         _rows = registry.table_rows()
         return html.Div([
+            html.H2("SkyWalker - Python observation planner tool"),
             html.H3(f"Night starts: {walker.nightstarts} @ {walker.sitename}",
                    id='sw-title'),
             dcc.Loading(children=[
@@ -819,6 +938,16 @@ def build_app(walker):
                     value=walker.nightstarts, placeholder='YYYY-MM-DD',
                     style=_input_style('120px'))),
                 html.Button('Recalculate', id='sw-date-apply', n_clicks=0),
+                # Prefilled with the walker's startup --minalt; neither
+                # set_location() nor apply_site() ever touches
+                # walker.minalt (see TrackRegistry.set_minalt()'s
+                # docstring), so a site switch leaves whatever value the
+                # user has set here alone.
+                _field(dcc, html, 'Min alt [deg]', dcc.Input(
+                    id='sw-minalt', type='number', min=0, max=89.99,
+                    step=0.5, value=walker.minalt,
+                    style=_input_style('90px'))),
+                html.Button('Set', id='sw-minalt-apply', n_clicks=0),
             ], id='sw-night-row', style={'display': 'flex', 'gap': '8px',
                                         'alignItems': 'flex-end',
                                         'flexWrap': 'wrap',
@@ -900,6 +1029,10 @@ def build_app(walker):
                                    '(decimal-degree RA/Dec)',
                              style={'fontSize': '20px', 'cursor': 'pointer'}),
                 html.Button('Download CSV', id='sw-dl-btn', n_clicks=0),
+                dcc.Upload(
+                    id='sw-csv-upload',
+                    children=html.Button('Load CSV', id='sw-csv-upload-btn'),
+                    multiple=False, style={'display': 'inline-block'}),
             ], id='sw-controls', style={'display': 'flex', 'gap': '8px',
                                         'alignItems': 'flex-end',
                                         'flexWrap': 'wrap',
@@ -921,7 +1054,11 @@ def build_app(walker):
                     {'if': {'column_id': 'swatch'}, 'width': '26px',
                      'maxWidth': '26px', 'overflow': 'hidden',
                      'padding': '4px 0'},
-                    {'if': {'column_id': 'name'}, 'textAlign': 'left'}],
+                    {'if': {'column_id': 'name'}, 'textAlign': 'left'},
+                    {'if': {'column_id': 'ra'}, 'width': '95px',
+                     'minWidth': '95px', 'maxWidth': '95px'},
+                    {'if': {'column_id': 'dec'}, 'width': '95px',
+                     'minWidth': '95px', 'maxWidth': '95px'}],
                 style_header={'fontWeight': 'bold',
                              'backgroundColor': 'var(--table-header-bg)',
                              'color': 'var(--fg)'},
@@ -963,15 +1100,16 @@ def build_app(walker):
         Output('sw-theme', 'data'),
         Input('sw-theme', 'id'))
 
-    # The site switch (Feature 1), per-cell edits (Feature 2), and the
-    # Recalculate date button all need to write sw-table.data/
-    # selected_rows and sw-status -- the same Outputs the MUTATOR above
-    # already owns -- so all three are folded into this one callback as
-    # more ctx.triggered_id branches, rather than adding a second writer
-    # and needing allow_duplicate=True. sw-title is a new Output added to
-    # the same callback for the same reason: only the site-apply and
-    # date-apply branches have anything to say about it, every other
-    # branch returns no_update for it.
+    # The site switch (Feature 1), per-cell edits (Feature 2), the
+    # Recalculate date button, the Set min-alt button and the Load CSV
+    # upload all need to write sw-table.data/selected_rows and sw-status
+    # -- the same Outputs the MUTATOR above already owns -- so all of
+    # them are folded into this one callback as more ctx.triggered_id
+    # branches, rather than adding a second writer and needing
+    # allow_duplicate=True. sw-title is a new Output added to the same
+    # callback for the same reason: only the site-apply and date-apply
+    # branches have anything to say about it, every other branch returns
+    # no_update for it.
     #
     # Editable-column edits arrive as Input('sw-table', 'data_timestamp'),
     # which dash_table only bumps for a front-end (user) edit of the
@@ -1098,6 +1236,8 @@ def build_app(walker):
         Input('sw-in-dec', 'n_submit'),
         Input('sw-site-apply', 'n_clicks'),
         Input('sw-date-apply', 'n_clicks'),
+        Input('sw-minalt-apply', 'n_clicks'),
+        Input('sw-csv-upload', 'contents'),
         Input('sw-table', 'data_timestamp'),
         State('sw-table', 'data'),
         State('sw-table', 'selected_rows'),
@@ -1113,11 +1253,14 @@ def build_app(walker):
         State('sw-site-elev', 'value'),
         State('sw-site-name', 'value'),
         State('sw-year-date', 'value'),
+        State('sw-minalt', 'value'),
+        State('sw-csv-upload', 'filename'),
         prevent_initial_call=True)
     def _mutate(_add, _remove, _all, _none, _invert, _sub1, _sub2, _apply,
-               _date_apply, _ts, rows, selected, name, ra, dec, blinit,
-               blockend, blocktime, site, lat, lon, elev, site_name,
-               date_text):
+               _date_apply, _minalt_apply, _csv_contents, _ts, rows,
+               selected, name, ra, dec, blinit, blockend, blocktime, site,
+               lat, lon, elev, site_name, date_text, minalt_value,
+               csv_filename):
         who = ctx.triggered_id
         rows = rows or []
         selected = selected or []
@@ -1200,6 +1343,55 @@ def build_app(walker):
                      f"{walker.sitename}")
             return (_rows, list(range(len(_rows))), _msg, _OK_STYLE,
                    no_update, _title)
+
+        if who == 'sw-minalt-apply':
+            try:
+                _minalt = float(minalt_value)
+            except (TypeError, ValueError):
+                return (rows, selected,
+                       f"'{minalt_value}' is not a number.", _ERR_STYLE,
+                       no_update, no_update)
+            if not (0. <= _minalt < 90.):
+                return (rows, selected,
+                       "Min altitude must be 0 <= value < 90 (got "
+                       f"{_minalt}).", _ERR_STYLE, no_update, no_update)
+            registry.set_minalt(_minalt)
+            _rows = registry.table_rows()
+            return (_rows, list(range(len(_rows))),
+                   f"Min altitude set to {_minalt:g} deg.", _OK_STYLE,
+                   no_update, no_update)
+
+        if who == 'sw-csv-upload':
+            if not _csv_contents:
+                return rows, selected, '', _OK_STYLE, no_update, no_update
+            try:
+                _b64data = _csv_contents.split(',', 1)[1]
+                _decoded = base64.b64decode(_b64data).decode(
+                    'utf-8', errors='replace')
+                _df = pd.read_csv(io.StringIO(_decoded))
+            except Exception as exc:
+                return (rows, selected,
+                       f"Could not read {csv_filename or 'the file'}: "
+                       f"{exc}", _ERR_STYLE, no_update, no_update)
+            if _df.empty:
+                return (rows, selected,
+                       f"{csv_filename or 'The file'} has no rows.",
+                       _ERR_STYLE, no_update, no_update)
+            try:
+                _df = walker.parse_target_dataframe(_df)
+            except ValueError as exc:
+                return (rows, selected, f"{csv_filename or 'CSV'}: {exc}",
+                       _ERR_STYLE, no_update, no_update)
+            _n, _skipped, _err = registry.replace_from_dataframe(_df)
+            if _err is not None:
+                return (rows, selected, f"{csv_filename or 'CSV'}: {_err}",
+                       _ERR_STYLE, no_update, no_update)
+            _rows = registry.table_rows()
+            _msg = f"Loaded {_n} target(s) from {csv_filename or 'CSV'}."
+            if _skipped:
+                _msg += " Skipped: " + '; '.join(_skipped)
+            return (_rows, list(range(len(_rows))), _msg, _OK_STYLE,
+                   no_update, no_update)
 
         if who == 'sw-table':
             return _handle_cell_edit(rows, selected)
@@ -1350,7 +1542,9 @@ def run_webapp(walker, host='127.0.0.1', port=8050, debug=False,
         Enable Dash/Werkzeug's debugger. Refused when host is not
         loopback, since the debugger allows remote code execution.
     open_browser : bool, optional
-        Open the UI in the default browser once the server is listening.
+        Open the page in a new tab of the default browser
+        (webbrowser.open_new_tab, which starts the browser if none is
+        running), once, shortly after the server starts.
     """
     if debug and host not in _LOOPBACK:
         raise ValueError(
@@ -1369,10 +1563,17 @@ def run_webapp(walker, host='127.0.0.1', port=8050, debug=False,
         print(f"  (remote access: ssh -L {port}:localhost:{port} "
              "user@this-host, then open http://localhost:%d/)" % port)
 
-    if open_browser:
+    # With debug on, Werkzeug's reloader re-runs this module in a child
+    # process (WERKZEUG_RUN_MAIN='true'); open the tab from the parent
+    # only, or every start -- and every reload -- would open another.
+    if open_browser and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         import webbrowser
+        # A wildcard bind address is not somewhere a browser can go.
+        _open_host = ('localhost' if host in ('0.0.0.0', '::', '')
+                      else host)
         threading.Timer(
-            1.0, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
+            1.0, lambda: webbrowser.open_new_tab(
+                f"http://{_open_host}:{port}/")).start()
 
     try:
         app.run(host=host, port=port, debug=debug)
