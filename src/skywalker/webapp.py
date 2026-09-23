@@ -44,7 +44,7 @@ _COLUMNS = [
     {'name': 'Target', 'id': 'name', 'editable': True},
     {'name': 'RA', 'id': 'ra', 'editable': True},
     {'name': 'Dec', 'id': 'dec', 'editable': True},
-    {'name': 'Block', 'id': 'blinit', 'editable': True},
+    {'name': 'ObsStart', 'id': 'blinit', 'editable': True},
     {'name': 'Dur', 'id': 'blockdur', 'editable': True},
     {'name': 'Peak alt', 'id': 'peakalt'},
     {'name': 'at', 'id': 'peaktime'},
