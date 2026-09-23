@@ -30,6 +30,30 @@ def _css_color(color):
     return _MPL_COLOR.get(color, color)
 
 
+def _over_white(color, alpha):
+    """Opaque (r, g, b) of color laid at alpha over white, 0-255 ints.
+
+    The night bands and the skychart are pre-blended rather than drawn
+    translucent, so the page theme's plot background never shows through
+    them: a bright-Moon night reads pale and a dark one deep blue in both
+    the light and the dark theme, as on the matplotlib figure's white axes.
+    """
+    from matplotlib.colors import to_rgb
+    return tuple(int(round(255. * (alpha * _c + 1. - alpha)))
+                 for _c in to_rgb(color))
+
+
+def _rgb_css(rgb):
+    """CSS 'rgb(r, g, b)' string for an (r, g, b) tuple of 0-255 ints."""
+    return 'rgb(%d, %d, %d)' % rgb
+
+
+def _is_dark(rgb):
+    """Whether light text/gridlines are needed on this (r, g, b) fill."""
+    _r, _g, _b = rgb
+    return (0.2126 * _r + 0.7152 * _g + 0.0722 * _b) / 255. < 0.5
+
+
 def _require_plotly():
     """Import plotly lazily, raising a clear error if it is not installed."""
     try:
@@ -57,7 +81,7 @@ def _local_midnight(local_times, delta_hours):
 
 def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                  moon_brightness, minalt, utcoffset_h, sitename,
-                 nightstarts, make_skychart=False):
+                 nightstarts, make_skychart=False, dark=False):
     """Build the interactive plotly figure.
 
     Parameters:
@@ -88,6 +112,14 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
     nightstarts : str
     make_skychart : bool, optional
         Whether to add the polar skychart panel. Default is False.
+    dark : bool, optional
+        Render for a dark browser theme: switches the plotly template to
+        'plotly_dark', fixes paper/plot background to '#1e1e1e', and
+        lightens the hover label and axis-spike colours. The night bands
+        and the skychart background do not follow the theme: they are
+        coloured by the Sun and the Moon's illumination alone. Default is
+        False, which is what render()/write_html() and every --savehtml
+        path use.
     """
     go, make_subplots = _require_plotly()
 
@@ -115,7 +147,10 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
         else:
             fig.add_trace(trace)
 
-    # Twilight/darkness bands, mirroring cli.Skywalker.set_plot() exactly.
+    # Twilight/darkness bands, mirroring cli.Skywalker.set_plot()'s colours
+    # and alphas, but pre-blended over white (see _over_white()) and drawn
+    # opaque, so they look the same whatever the page theme. The Moon-up
+    # astronomical night is therefore as pale as the Moon is bright.
     _bands = [
         ((sun_alt < 0.) & (sun_alt > -6.3), 'indigo', 0.8),
         ((sun_alt < -6.) & (sun_alt > -12.3), 'indigo', 0.9),
@@ -128,7 +163,8 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
         for _t0, _t1 in mask_to_intervals(local_times, _mask):
             fig.add_shape(type='rect', xref='x', yref='y domain',
                          x0=_t0, x1=_t1, y0=0, y1=1,
-                         fillcolor=_color, opacity=_alpha, line_width=0,
+                         fillcolor=_rgb_css(_over_white(_color, _alpha)),
+                         opacity=1., line_width=0,
                          layer='below', **_rc)
 
     # minalt limit line.
@@ -153,13 +189,13 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
             # uses a '%{...}' syntax that a Python '%' operator would choke
             # on (the moon illumination is baked in as a literal, since it
             # is a single scalar rather than a per-sample value).
-            _hover = ('%{y:.1f}&deg;  &middot;  illum. '
+            _hover = ('%{y:.1f}&deg;  ·  illum. '
                      + ('%.0f' % (moon_brightness * 100.)) + '%')
         else:
             _color = _track_color(_track, _obj_index)
             _obj_index += 1
-            _hover = ('%{y:.1f}&deg;  &middot;  X %{customdata[0]:.2f}'
-                      '  &middot;  Az %{customdata[1]:.0f}&deg;')
+            _hover = ('%{y:.1f}&deg;  ·  X %{customdata[0]:.2f}'
+                      '  ·  Az %{customdata[1]:.0f}&deg;')
 
         _add(go.Scatter(x=local_times, y=_y, mode='lines', name=_name,
                         legendgroup=_name,
@@ -188,10 +224,27 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                 name=_track['name'], **_rc)
 
     if make_skychart:
+        # The whole chart is tinted by the Moon's illuminated fraction, the
+        # same colour as the staralt panel's Moon-up night band, and like it
+        # does not follow the page theme; labels and gridlines pick light or
+        # dark ink to stay readable on it.
+        _sky = _over_white('midnightblue', 1. - moon_brightness)
+        _ink = '#e0e0e0' if _is_dark(_sky) else '#222222'
+        _grid = ('rgba(255, 255, 255, 0.3)' if _is_dark(_sky)
+                 else 'rgba(0, 0, 0, 0.2)')
+        # Red ring below minalt, as the matplotlib skychart draws it
+        # (red at alpha 0.7), pre-blended over white like the sky itself.
+        # Added before the stars so they draw on top of it.
+        if minalt > 0.:
+            fig.add_trace(go.Barpolar(
+                r=[minalt], base=[91. - minalt], theta=[0.], width=[360.],
+                marker=dict(color=_rgb_css(_over_white('red', 0.7)),
+                            line_width=0),
+                showlegend=False, hoverinfo='skip', name='minalt',
+                meta='sw-fixed'),
+                row=1, col=2)
         _obj_index = 0
         for _track in tracks:
-            # Mirror the colour-assignment loop above exactly, so a track's
-            # skychart marker always matches its altitude-panel line.
             if not _track['is_moon']:
                 _color = _track_color(_track, _obj_index)
                 _obj_index += 1
@@ -205,7 +258,8 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
             fig.add_trace(go.Scatterpolar(
                 r=91. - _calt, theta=_caz, mode='markers+text',
                 text=['%.1f' % h for h in _chours],
-                textposition='top center', textfont=dict(size=8),
+                textposition='top center',
+                textfont=dict(size=8, color=_ink),
                 marker=dict(size=9, symbol='star', color=_color),
                 name=_track['name'], legendgroup=_track['name'],
                 showlegend=False,
@@ -216,35 +270,50 @@ def build_figure(tracks, local_times, delta_hours, sun_alt, moon_alt,
                 row=1, col=2)
 
     _title = f"Night starts: {nightstarts} @ {sitename}"
-    fig.update_layout(
+    _hoverlabel = dict(font_family='monospace', align='left',
+                       namelength=-1)
+    _layout_kwargs = dict(
         title=_title,
         uirevision='skywalker',       # keep zoom/pan across figure rebuilds
         hovermode='x unified',
-        hoverlabel=dict(font_family='monospace', align='left',
-                        namelength=-1),
+        hoverlabel=_hoverlabel,
         legend=dict(x=0.99, y=0.99, xanchor='right', yanchor='top'),
         margin=dict(l=60, r=40, t=60, b=50),
         width=1400 if make_skychart else 900, height=620)
+    if dark:
+        # Not folded into _hoverlabel/_layout_kwargs above: keeping the
+        # light-mode call's kwargs untouched means dark=False (every
+        # --savehtml/render()/write_html() caller) reaches
+        # fig.update_layout() with the exact same arguments as before
+        # this parameter existed.
+        _hoverlabel.update(bgcolor='#2a2a2a', font=dict(color='#e0e0e0'))
+        _layout_kwargs.update(template='plotly_dark',
+                              paper_bgcolor='#1e1e1e',
+                              plot_bgcolor='#1e1e1e')
+    fig.update_layout(**_layout_kwargs)
 
     fig.update_xaxes(
         title=f'Local Time [UTC{utcoffset_h:+d}]',
         showspikes=True, spikemode='across', spikesnap='cursor',
-        spikethickness=1, spikedash='dot', spikecolor='#555',
+        spikethickness=1, spikedash='dot',
+        spikecolor='#bbb' if dark else '#555',
         hoverformat='%H:%M', **_rc)
     fig.update_yaxes(title='Altitude [deg]', range=[0, 90], **_rc)
 
     if make_skychart:
         fig.update_polars(
+            bgcolor=_rgb_css(_sky),
             angularaxis=dict(direction='counterclockwise', rotation=90,
                              tickmode='array', tickvals=_COMPASS_DEG,
-                             ticktext=_COMPASS_LABELS),
-            radialaxis=dict(range=[1, 91], angle=-45))
+                             ticktext=_COMPASS_LABELS, gridcolor=_grid),
+            radialaxis=dict(range=[1, 91], angle=-45, gridcolor=_grid,
+                            tickfont=dict(color=_ink)))
 
     return fig
 
 
 def build_year_figure(curves, dates, minalt, sitename, marked_date,
-                      metric='alt'):
+                      metric='alt', dark=False):
     """Build the year-view plotly figure: one line per target, per month.
 
     Pure reshaper, like build_figure(): it does no astronomy, only lays out
@@ -282,6 +351,12 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
         varies by site and season. Either way the hover shows both
         peak_alt and hours_up; only which one drives the y axis, and which
         one sits in customdata[1], swaps.
+    dark : bool, optional
+        Render for a dark browser theme: 'plotly_dark' template, fixed
+        '#1e1e1e' paper/plot background, a lightened hover label, and a
+        lighter '#bbb' marked-date line (the light-mode '#888' reads as
+        near-invisible against a dark paper). Default is False, which
+        reproduces today's figure exactly.
 
     The y value in 'alt' mode is the peak altitude reached during
     astronomical night (Sun below -18 deg, see plotdata.astro_night_mask()),
@@ -322,12 +397,12 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
         if metric == 'hours':
             _y = _hours_up
             _customdata = np.stack([_peak_time, _peak_alt], axis=-1)
-            _hover = ('%{y:.1f} h usable &middot; peak '
+            _hover = ('%{y:.1f} h usable · peak '
                      '%{customdata[1]:.1f}&deg; at %{customdata[0]}')
         else:
             _y = _peak_alt
             _customdata = np.stack([_peak_time, _hours_up], axis=-1)
-            _hover = ('%{y:.1f}&deg; at %{customdata[0]} &middot; '
+            _hover = ('%{y:.1f}&deg; at %{customdata[0]} · '
                      '%{customdata[1]:.1f} h usable')
 
         fig.add_trace(go.Scatter(
@@ -346,13 +421,15 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
     # other installed version still rejects it.
     _marked_dt = datetime.combine(marked_date, datetime.min.time())
     _marked_label = marked_date.strftime('%Y-%m-%d')
+    _marker_color = '#bbb' if dark else '#888'
     try:
-        fig.add_vline(x=_marked_dt, line=dict(color='#888', dash='dot'),
+        fig.add_vline(x=_marked_dt,
+                     line=dict(color=_marker_color, dash='dot'),
                      annotation_text=_marked_label)
     except (TypeError, ValueError):
         fig.add_shape(type='line', xref='x', yref='y domain',
                      x0=_marked_dt, x1=_marked_dt, y0=0, y1=1,
-                     line=dict(color='#888', dash='dot'))
+                     line=dict(color=_marker_color, dash='dot'))
         fig.add_annotation(x=_marked_dt, y=1, yref='y domain',
                           yanchor='bottom', text=_marked_label, showarrow=False)
 
@@ -362,7 +439,9 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
     else:
         _title = ("Year view: peak altitude during astronomical night "
                  f"@ {sitename}")
-    fig.update_layout(
+    _hoverlabel = dict(font_family='monospace', align='left',
+                       namelength=-1)
+    _layout_kwargs = dict(
         title=_title,
         # Keyed by year, not a bare constant: a metric switch or a
         # target-selection change keeps the same key, so the user's
@@ -371,10 +450,15 @@ def build_year_figure(curves, dates, minalt, sitename, marked_date,
         # certainly meaningless against a different year's data.
         uirevision=f'skywalker-year-{dates[0].year}',
         hovermode='x unified',
-        hoverlabel=dict(font_family='monospace', align='left',
-                        namelength=-1),
+        hoverlabel=_hoverlabel,
         height=360, autosize=True, width=None,
         margin=dict(l=60, r=40, t=50, b=40))
+    if dark:
+        _hoverlabel.update(bgcolor='#2a2a2a', font=dict(color='#e0e0e0'))
+        _layout_kwargs.update(template='plotly_dark',
+                              paper_bgcolor='#1e1e1e',
+                              plot_bgcolor='#1e1e1e')
+    fig.update_layout(**_layout_kwargs)
 
     fig.update_xaxes(title='Date', tickformat='%b %Y', dtick='M1')
     if metric == 'hours':

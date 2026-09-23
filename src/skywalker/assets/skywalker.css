@@ -1,0 +1,109 @@
+/* skywalker web UI theme: follows the browser's prefers-color-scheme
+ * live. Dash (Dash(__name__) in webapp.py) auto-serves every file in
+ * assets/ next to the module, so this file needs no registration.
+ *
+ * Scope: colour tokens only. No layout/sizing rules live here -- those
+ * stay inline in webapp.py, matching the rest of that module's style.
+ */
+
+:root {
+    color-scheme: light dark;
+
+    --bg: #ffffff;
+    --fg: #111111;
+    --label: #555555;
+    --input-bg: #ffffff;
+    --input-border: #bbbbbb;
+    --table-header-bg: #f2f2f2;
+    --table-cell-bg: #ffffff;
+    --table-border: #dddddd;
+    --focus-row-bg: #eef4ff;
+    --ok: #007700;
+    --err: #bb0000;
+    --button-bg: #f5f5f5;
+    --button-fg: #111111;
+    --button-border: #bbbbbb;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1e1e1e;
+        --fg: #e0e0e0;
+        --label: #bbbbbb;
+        --input-bg: #2a2a2a;
+        --input-border: #555555;
+        --table-header-bg: #2a2a2a;
+        --table-cell-bg: #1e1e1e;
+        --table-border: #444444;
+        --focus-row-bg: #233044;
+        --ok: #4caf50;
+        --err: #ff6b6b;
+        --button-bg: #2a2a2a;
+        --button-fg: #e0e0e0;
+        --button-border: #555555;
+    }
+
+    /* dcc.Dropdown (Dash 4's own component, not react-select) is themed
+     * entirely through these --Dash-* custom properties -- its bundled
+     * CSS (site-packages/dash/dcc/dash_core_components.js, the
+     * ":root { --Dash-Fill-Interactive-Strong: #7f4bc4; ... }" block
+     * webpack'd into that file) ships exactly one, permanently-light,
+     * unconditional set of values and no dark-mode handling at all,
+     * e.g. .dash-dropdown-content's "background:
+     * var(--Dash-Fill-Inverse-Strong)" for the open menu and
+     * .dash-options-list-option's "color: var(--Dash-Text-Strong)" for
+     * both the closed trigger's icon/count and every open-menu option
+     * row (dcc.RadioItems' option labels use this exact same shared
+     * class, which is why they need no separate selector here -- they
+     * already inherit --Dash-Text-Strong).
+     *
+     * That default block and this one are both plain ":root" rules, so
+     * they have equal specificity, and Dash injects its stylesheet at
+     * JS-module-load time -- after this file's own <link>, since Dash
+     * places {%css%} in <head> and {%scripts%} at the end of <body> --
+     * which would let ITS later, unconditional light values win the
+     * cascade tie and silently overrule everything below. "html:root"
+     * (0,1,1) beats a bare ":root" (0,1,0) regardless of source order,
+     * so these values always win instead.
+     *
+     * --Dash-Fill-Inverse-strong (lowercase "s") is not a typo here: the
+     * option-row background is bound to that exact lowercase spelling
+     * inside Dash's own CSS, a different custom property from the
+     * uppercase "--Dash-Fill-Inverse-Strong" the closed dropdown/menu
+     * border and the open menu's own background use. Both must be set.
+     */
+    html:root {
+        --Dash-Fill-Inverse-Strong: var(--input-bg);
+        --Dash-Fill-Inverse-strong: var(--input-bg);
+        --Dash-Text-Primary: var(--fg);
+        --Dash-Text-Strong: var(--fg);
+        --Dash-Text-Weak: var(--label);
+        --Dash-Text-Disabled: #888888;
+        --Dash-Stroke-Strong: var(--input-border);
+        --Dash-Stroke-Weak: var(--table-border);
+        --Dash-Fill-Interactive-Strong: #6ea8fe;
+        --Dash-Fill-Interactive-Weak: rgba(255, 255, 255, 0.06);
+        --Dash-Fill-Primary-Hover: rgba(255, 255, 255, 0.05);
+        --Dash-Fill-Primary-Active: rgba(255, 255, 255, 0.09);
+        --Dash-Fill-Disabled: var(--table-border);
+        --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
+        --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
+    }
+}
+
+body {
+    background: var(--bg);
+    color: var(--fg);
+}
+
+input {
+    background: var(--input-bg);
+    color: var(--fg);
+    border: 1px solid var(--input-border);
+}
+
+button {
+    background: var(--button-bg);
+    color: var(--button-fg);
+    border: 1px solid var(--button-border);
+}

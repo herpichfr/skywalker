@@ -48,8 +48,8 @@ _COLUMNS = [
     {'name': 'Moon', 'id': 'moondist'},
 ]
 
-_OK_STYLE = {'color': '#070', 'minHeight': '1.4em', 'fontSize': '13px'}
-_ERR_STYLE = {'color': '#b00', 'minHeight': '1.4em', 'fontSize': '13px'}
+_OK_STYLE = {'color': 'var(--ok)', 'minHeight': '1.4em', 'fontSize': '13px'}
+_ERR_STYLE = {'color': 'var(--err)', 'minHeight': '1.4em', 'fontSize': '13px'}
 
 
 def _require_dash():
@@ -657,7 +657,8 @@ def _swatch_styles(rows, focus=None):
                         'backgroundColor': _hex, 'color': _hex})
     if focus:
         _styles.append({'if': {'filter_query': f'{{name}} = "{focus}"'},
-                        'backgroundColor': '#eef4ff', 'fontWeight': 'bold'})
+                        'backgroundColor': 'var(--focus-row-bg)',
+                        'fontWeight': 'bold'})
     return _styles
 
 
@@ -666,6 +667,10 @@ def _apply_focus(fig, focus):
     if not focus:
         return fig
     for _trace in fig.data:
+        # Chart furniture (the skychart's minalt ring) belongs to no
+        # target and is never dimmed.
+        if getattr(_trace, 'meta', None) == 'sw-fixed':
+            continue
         _mine = (_trace.name == focus)
         _trace.opacity = 1.0 if _mine else 0.15
         if getattr(_trace, 'mode', None) == 'lines':
@@ -708,7 +713,7 @@ def _input_style(width):
 def _field(dcc, html, label, component):
     return html.Div([html.Label(label, style={'display': 'block',
                                               'fontSize': '11px',
-                                              'color': '#555'}),
+                                              'color': 'var(--label)'}),
                      component],
                     style={'display': 'flex', 'flexDirection': 'column'})
 
@@ -761,14 +766,14 @@ def build_app(walker):
                      for _s in sorted(set(EarthLocation.get_site_names()))
                      if _s]
 
-    def _build_figure(names, focus=None):
+    def _build_figure(names, focus=None, dark=False):
         _fig = htmlplot.build_figure(
             registry.ordered_tracks(names), registry.local_times,
             walker.delta_midnight.value, walker.sunaltaz_time_overnight.alt.value,
             walker.moonaltaz_time_overnight.alt.value,
             walker.moon_brightness.value, walker.minalt,
             int(walker.utcoffset.value), walker.sitename, walker.nightstarts,
-            make_skychart=walker.make_skychart)
+            make_skychart=walker.make_skychart, dark=dark)
         _fig.update_layout(width=None, autosize=True)
         return _apply_focus(_fig, focus)
 
@@ -789,6 +794,12 @@ def build_app(walker):
             # warning is about numpy arrays and datetimes silently mangled
             # by plotly's JSON encoder; a plain bool round-trips exactly.
             dcc.Store(id='sw-year-on', data=False),
+            # 'light' or 'dark', set once by the clientside callback below
+            # from the browser's prefers-color-scheme and kept live by its
+            # 'change' listener -- never written from Python. None until
+            # that first clientside call lands, which _view/_view_year
+            # both treat as light (dark = (theme == 'dark')).
+            dcc.Store(id='sw-theme', data=None),
             html.Div([
                 html.Span('Night', style={'fontWeight': 'bold',
                                           'fontSize': '13px',
@@ -902,23 +913,55 @@ def build_app(walker):
                 style_table={'width': '100%', 'overflowX': 'auto',
                             'maxHeight': '340px', 'overflowY': 'auto'},
                 style_cell={'fontFamily': 'monospace', 'fontSize': '12px',
-                           'padding': '4px 8px', 'textAlign': 'right'},
+                           'padding': '4px 8px', 'textAlign': 'right',
+                           'backgroundColor': 'var(--table-cell-bg)',
+                           'color': 'var(--fg)',
+                           'border': '1px solid var(--table-border)'},
                 style_cell_conditional=[
                     {'if': {'column_id': 'swatch'}, 'width': '26px',
                      'maxWidth': '26px', 'overflow': 'hidden',
                      'padding': '4px 0'},
                     {'if': {'column_id': 'name'}, 'textAlign': 'left'}],
                 style_header={'fontWeight': 'bold',
-                             'backgroundColor': '#f2f2f2'},
+                             'backgroundColor': 'var(--table-header-bg)',
+                             'color': 'var(--fg)'},
                 style_data_conditional=_swatch_styles(_rows),
                 fixed_rows={'headers': True}),
             dcc.Download(id='sw-dl'),
         ], style={'maxWidth': '1420px', 'margin': '0 auto',
                  'fontFamily': 'sans-serif'})
 
-    app = Dash(__name__, title=f"skywalker {walker.nightstarts}",
+    app = Dash(__name__, title="SkyWalker - Python observation planner tool",
               update_title=None)
     app.layout = _serve_layout
+
+    # Theme detection lives entirely client-side: the callback below runs
+    # once on page load (Input('sw-theme', 'id') fires on the initial
+    # call because prevent_initial_call defaults to False, and an 'id'
+    # prop never changes afterwards, so it never fires again on its own),
+    # reads window.matchMedia('(prefers-color-scheme: dark)').matches,
+    # and registers a 'change' listener -- guarded by a window flag so a
+    # second initial call (e.g. a second browser tab) never double-
+    # registers it -- that pushes a live update straight into sw-theme.data
+    # via dash_clientside.set_props(), with no round trip through Python.
+    app.clientside_callback(
+        """
+        function(_) {
+            if (!window._skywalkerThemeListenerAdded) {
+                window._skywalkerThemeListenerAdded = true;
+                var mql = window.matchMedia(
+                    '(prefers-color-scheme: dark)');
+                mql.addEventListener('change', function(e) {
+                    window.dash_clientside.set_props(
+                        'sw-theme', {data: e.matches ? 'dark' : 'light'});
+                });
+            }
+            return window.matchMedia(
+                '(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        """,
+        Output('sw-theme', 'data'),
+        Input('sw-theme', 'id'))
 
     # The site switch (Feature 1), per-cell edits (Feature 2), and the
     # Recalculate date button all need to write sw-table.data/
@@ -1204,13 +1247,14 @@ def build_app(walker):
         Output('sw-clip', 'content'),
         Input('sw-table', 'data'),
         Input('sw-table', 'selected_rows'),
-        Input('sw-table', 'active_cell'))
-    def _view(rows, selected, active_cell):
+        Input('sw-table', 'active_cell'),
+        Input('sw-theme', 'data'))
+    def _view(rows, selected, active_cell, theme):
         rows = rows or []
         selected = selected or []
         _names = [rows[i]['name'] for i in selected if i < len(rows)]
         _focus = _resolve_focus(active_cell, rows)
-        _fig = _build_figure(_names, focus=_focus)
+        _fig = _build_figure(_names, focus=_focus, dark=(theme == 'dark'))
         _csv = plotdata.format_selection_csv(
             registry.ordered_tracks(_names))
         return _fig, _swatch_styles(rows, focus=_focus), _csv
@@ -1235,8 +1279,10 @@ def build_app(walker):
         Input('sw-year-date', 'value'),
         Input('sw-table', 'data'),
         Input('sw-table', 'selected_rows'),
-        Input('sw-table', 'active_cell'))
-    def _view_year(on, metric, year_date, rows, selected, active_cell):
+        Input('sw-table', 'active_cell'),
+        Input('sw-theme', 'data'))
+    def _view_year(on, metric, year_date, rows, selected, active_cell,
+                 theme):
         # Lazy contract: while the panel is hidden nothing here is
         # computed, so app startup and ordinary target-adding stay exactly
         # as fast as they are today.
@@ -1258,7 +1304,7 @@ def build_app(walker):
             return {}
         _fig = htmlplot.build_year_figure(
             _curves, _dates, walker.minalt, walker.sitename,
-            _marked, metric=metric)
+            _marked, metric=metric, dark=(theme == 'dark'))
         _fig.update_layout(width=None, autosize=True)
         return _apply_focus(_fig, _focus)
 
