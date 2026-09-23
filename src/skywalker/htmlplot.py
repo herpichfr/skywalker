@@ -26,8 +26,17 @@ _MPL_COLOR = {'c': 'cyan', 'k': 'black', 'm': 'magenta',
 
 
 def _css_color(color):
-    """Map a matplotlib single-letter colour code to a CSS colour name."""
-    return _MPL_COLOR.get(color, color)
+    """Map any matplotlib colour to a CSS colour plotly accepts.
+
+    Single-letter codes map to CSS names, other strings pass through, and
+    anything else goes through matplotlib.colors.to_hex(): since matplotlib
+    3.11, Line2D.get_color() returns an RGB(A) tuple rather than a hex
+    string, and plotly rejects tuples.
+    """
+    if color is None or isinstance(color, str):
+        return _MPL_COLOR.get(color, color)
+    from matplotlib.colors import to_hex
+    return to_hex(color, keep_alpha=len(color) == 4)
 
 
 def _over_white(color, alpha):

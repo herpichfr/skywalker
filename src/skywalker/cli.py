@@ -613,7 +613,14 @@ class Skywalker:
                 "BLINIT.")
             df['BLINIT'] = [self.time] * len(df)
         else:
-            df['BLINIT'] = self.check_blockinit_format(df['BLINIT'])
+            # A blank cell is read as NaN, which check_blockinit_format()
+            # cannot take; give it the same default as a missing column.
+            # Work on an object copy: pandas 3 refuses to write the
+            # normalised 'HH:MM:SS' strings into a float column, which is
+            # what an all-numeric BLINIT column (e.g. 1.5) is read as.
+            _blinit = df['BLINIT'].astype(object)
+            df['BLINIT'] = self.check_blockinit_format(
+                _blinit.where(_blinit.notna(), self.time))
             df['BLINIT'] = df['BLINIT'].apply(
                 lambda x: Time(self.nightstarts + "T" + x,
                               format='isot').strftime('%H:%M:%S'))
@@ -621,6 +628,13 @@ class Skywalker:
             self.logger.warning(
                 "BLOCKTIME column not found. Using 0 as BLOCKTIME.")
             df['BLOCKTIME'] = [0] * len(df)
+        else:
+            df['BLOCKTIME'] = df['BLOCKTIME'].fillna(0)
+        _blank_name = df['NAME'].isna()
+        if _blank_name.any():
+            df['NAME'] = df['NAME'].astype(object)
+            df.loc[_blank_name, 'NAME'] = [
+                "Obj" + str(i + 1) for i in np.flatnonzero(_blank_name)]
         _ra_deg, _ra_warning = parse_ra_column(
             df['RA'], raunit=self.raunit, names=df['NAME'])
         if _ra_warning is not None:
