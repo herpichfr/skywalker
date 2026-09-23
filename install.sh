@@ -38,21 +38,21 @@ function check_basic_requirements() {
         echo "pip3 is not installed. Please install it with sudo $PACKAGE_MANAGER install python3-pip"
         exit 1
     else
-        if command -v dpkg >/dev/null 2>&1; then
-            if ! dpkg -s python3-venv >/dev/null 2>&1; then
-                echo "Python3 venv is not installed. Please install it with sudo $PACKAGE_MANAGER install python3-venv"
-                exit 1
-            fi
-        elif command -v rpm >/dev/null 2>&1; then
-            if ! rpm -q python3-venv >/dev/null 2>&1; then
-                echo "Python3 venv is not installed. Please install it with sudo $PACKAGE_MANAGER install python3-venv"
-                exit 1
-            else
-                echo "Python3 venv is installed."
-            fi
+        # Debian/Ubuntu split venv's ensurepip into python3-venv; elsewhere
+        # it ships with Python. Test the capability, not a package name.
+        if ! python3 -c "import venv, ensurepip" >/dev/null 2>&1; then
+            echo "Python3 venv is not usable. On Debian/Ubuntu install it with sudo $PACKAGE_MANAGER install python3-venv"
+            exit 1
         fi
         echo "Python3 is installed."
     fi
+
+    # pip fetches the required astroplan fork straight from GitHub.
+    if ! command -v git >/dev/null 2>&1; then
+        echo "git is not installed. Please install it with sudo $PACKAGE_MANAGER install git"
+        exit 1
+    fi
+    echo "git is installed."
 
 }
 
@@ -67,7 +67,8 @@ function install_dependencies() {
     source "$PATH_TO_THIS_SCRIPT/venv/bin/activate"
     # Install the package and its dependencies
     if [ -f "$PATH_TO_THIS_SCRIPT/pyproject.toml" ]; then
-        pip install -e "$PATH_TO_THIS_SCRIPT"
+        # [web] adds plotly and dash, so --savehtml and --web work too.
+        pip install -e "${PATH_TO_THIS_SCRIPT}[web]"
     else
         echo "pyproject.toml not found. Please run this script from within the skywalker repository."
         exit 1

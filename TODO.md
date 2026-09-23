@@ -8,5 +8,3 @@
 - Add a check/uncheck-all control for the target table (note: `All`/`None` buttons
   already exist in the web UI toolbar — confirm whether this means the same thing or a
   header checkbox directly on the table).
-- Add individual cell editing to the target table (e.g. edit RA, Dec, or block times
-  directly in a row instead of only through the add-target form).

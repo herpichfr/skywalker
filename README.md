@@ -4,7 +4,7 @@ SkyWalker - Python observation planner tool
 [![Version](https://img.shields.io/github/v/release/herpichfr/skywalker)](https://img.shields.io/github/v/release/herpichfr/skywalker)
 ![GitHub issues](https://img.shields.io/github/issues/herpichfr/skywalker)
 [![License](https://img.shields.io/badge/license-GNUv3.0-green)](LICENSE)
-[![Python 3](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 ![GitHub](https://img.shields.io/github/stars/herpichfr/skywalker?style=social)
 
 By Herpich F. R.  
@@ -18,12 +18,14 @@ Usage
 
 ``skywalker --help``
 
-(if you did not install the package, you can also run it in place with ``python -m skywalker --help`` from the ``src`` directory, or ``python src/skywalker/cli.py --help`` from the repository root)
+(without installing the package, you can also run it in place with ``python -m skywalker --help`` from the ``src`` directory, or ``python src/skywalker/cli.py --help`` from the repository root; the dependencies below still have to be installed)
 
 Requisites
 ----------
 
 ``python >= 3.9``
+
+``git`` (``pip`` fetches the required ``astroplan`` fork from GitHub)
 
 ``pandas``
 ``timezonefinder``
@@ -32,6 +34,15 @@ Requisites
 ``matplotlib``
 ``astropy``
 ``astroplan``
+
+Optional: ``plotly`` for ``--savehtml``, and ``plotly`` plus ``dash`` for ``--web``.
+
+Internet access is needed at run time to resolve target names (``--object``), named sites
+(``--site``, and the web UI's site list), and for astropy's Earth-orientation data, which is
+downloaded once and cached. Offline, give coordinates and a ``--sitefile``.
+
+The interactive plot window uses PyQt5. On a minimal or headless system it may need Qt's
+system libraries (the ``libxcb-*`` packages); ``--savefig``, ``--savehtml`` and ``--web`` do not.
 
 This code uses a modified version of the Astroplan code (https://astroplan.readthedocs.io/en/latest/). If you use this code in your research, please cite accordingly (see https://github.com/astropy/astroplan for the full reference provided by the authors).
 
@@ -62,9 +73,9 @@ To use the interactive web UI (``--web``, see below), install the ``web`` extra 
 
 ``pip install -e '.[web]'``
 
-Alternatively, the ``install.sh`` helper script can create a virtual environment and install the package into it for you.
+Alternatively, the ``install.sh`` helper script can create a virtual environment and install the package into it for you, including the ``web`` extra.
 
-To check for basic system requirements (Python 3, pip, venv), run:
+To check for basic system requirements (Python 3, pip, venv, git), run:
 
 ``bash install.sh --check``
 
