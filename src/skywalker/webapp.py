@@ -91,7 +91,7 @@ def _format_blinit(value):
     anything. This used to accept genuine garbage like "25:99:99"
     outright, silently, which is what the rest of this check still
     catches. All three call sites -- the Add-target form's block-start
-    field, the table's editable Block cell, and the block-end field
+    field, the table's editable ObsStart cell, and the block-end field
     inside _resolve_blocktime() -- already wrap this call in a
     try/except, so raising here is enough to make all three reject bad
     input.

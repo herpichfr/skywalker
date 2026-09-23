@@ -171,6 +171,5 @@ uploaded. No automated test suite exists.
 - Unify the Add-target form's "Block size [s]" field with the Dur cell's unit parsing.
 - `TODO.md` still lists "Add individual cell editing to the target table", delivered in
   `81b5c12`. Prune it next time that file is touched.
-- Uncommitted, not part of this session's commits: the table column rename `Block` →
-  `ObsStart` in `webapp.py`, and the matplotlib hover's Moon `illum. NN%` readout in
-  `cli.py` / `hover.py`.
+- The table column rename `Block` → `ObsStart` and the matplotlib hover's Moon `illum. NN%`
+  readout, previously uncommitted, are now in `1189636` and `7a09580`. Nothing is pending.
