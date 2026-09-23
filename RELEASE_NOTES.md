@@ -45,3 +45,6 @@ Please report problems at https://github.com/herpichfr/skywalker/issues.
 
 Needs `git` (for the `astroplan` fork) and internet access for name and site lookups. Tested on
 Linux only.
+
+Verified with a clean install from a fresh clone via `install.sh --install` on Python 3.13,
+which resolved matplotlib 3.11, pandas 3.0, astropy 8.0, plotly 7.1 and dash 4.4.
