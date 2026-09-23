@@ -1101,6 +1101,12 @@ class Skywalker:
                 f"Backend '{matplotlib.get_backend()}' is not interactive: \
                 hover cursor not enabled.")
             return
+        # self.moon_brightness is only None before set_night_frames() has
+        # run, which always happens before set_hover() in main(); the guard
+        # is defensive rather than reachable, so a future call order still
+        # fails soft instead of raising here.
+        _moon_brightness = (self.moon_brightness.value
+                            if self.moon_brightness is not None else None)
         # Keep the reference: matplotlib holds callbacks weakly, so an
         # unreferenced cursor is garbage collected and hover silently stops.
         self.time_cursor = TimeCursor(self.fig, self.ax1, self.tracks,
@@ -1108,6 +1114,7 @@ class Skywalker:
                                       ax2=self.ax2, ax3=self.ax3,
                                       utcoffset=self.utcoffset.value,
                                       minalt=self.minalt,
+                                      moon_brightness=_moon_brightness,
                                       logger=self.logger).connect()
         self.logger.info(
             f"Hover cursor enabled for {len(self.tracks)} track(s).")

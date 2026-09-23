@@ -66,6 +66,9 @@ class TimeCursor:
         Offset of local time from UTC in hours, for the readout header.
     minalt : float, optional
         Minimum safe telescope altitude in degrees. Rows below it are flagged.
+    moon_brightness : float, optional
+        Moon illuminated fraction, 0-1. Appended as 'illum. NN%' to the
+        Moon's own row when given. Default is None, which omits it.
     max_rows : int, optional
         Largest number of object rows to list. Default is 14.
     snap_px : float, optional
@@ -84,8 +87,8 @@ class TimeCursor:
     """
 
     def __init__(self, fig, ax1, tracks, x, ax2=None, ax3=None,
-                 utcoffset=0., minalt=0., max_rows=14, snap_px=45.,
-                 useblit=True, logger=None):
+                 utcoffset=0., minalt=0., moon_brightness=None,
+                 max_rows=14, snap_px=45., useblit=True, logger=None):
 
         self.fig = fig
         self.ax1 = ax1
@@ -95,6 +98,7 @@ class TimeCursor:
         self.x = np.asarray(x, dtype=float)
         self.utcoffset = utcoffset
         self.minalt = minalt
+        self.moon_brightness = moon_brightness
         self.max_rows = max_rows
         self.snap_px = snap_px
         self.useblit = bool(useblit) and fig.canvas.supports_blit
@@ -265,9 +269,15 @@ class TimeCursor:
         # Blank out useless airmasses the same way the twin axis does.
         _airstr = '>10' if _air > 10. else '%.2f' % _air
         _flag = '!' if (not track['is_moon'] and alt < self.minalt) else ''
-        return '%-*s %5.1f %6s%s' % (self._namew,
+        _row = '%-*s %5.1f %6s%s' % (self._namew,
                                      track['name'][:self._namew],
                                      alt, _airstr, _flag)
+        if track['is_moon'] and self.moon_brightness is not None:
+            # Mirrors htmlplot's hovertemplate wording ('illum. NN%'), baked
+            # in here as a scalar the same way: the fraction does not vary
+            # with time, so it does not need a column of its own.
+            _row += ' illum. %.0f%%' % (self.moon_brightness * 100.)
+        return _row
 
     def _clock_label(self, xval):
         """Return the local clock time at xval, as the x ticks label it."""
