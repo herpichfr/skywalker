@@ -4,6 +4,8 @@ First release since v1.4.5, and the first as an installable package. It is a bet
 in particular has been exercised by driving its callbacks, far more than by hand in a browser.
 Please report problems at https://github.com/herpichfr/skywalker/issues.
 
+> **Disclaimer:** this package was built relying heavily on AI-assisted coding tools. Use it at your own discretion, and check its results before relying on them for observation planning. It is provided without warranty; see LICENSE.
+
 ## Breaking changes
 
 - **SkyWalker is now a pip-installable package** with a `skywalker` console command, replacing

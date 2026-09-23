@@ -1,6 +1,8 @@
 SkyWalker - Python observation planner tool
 ===========================================
 
+> **Disclaimer:** this package was built relying heavily on AI-assisted coding tools. The code has been reviewed and tested, but not exhaustively. Use it at your own discretion, and check its results before relying on them for observation planning. It is provided without warranty; see [LICENSE](LICENSE).
+
 [![Version](https://img.shields.io/github/v/release/herpichfr/skywalker)](https://img.shields.io/github/v/release/herpichfr/skywalker)
 ![GitHub issues](https://img.shields.io/github/issues/herpichfr/skywalker)
 [![License](https://img.shields.io/badge/license-GNUv3.0-green)](LICENSE)
