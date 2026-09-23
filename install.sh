@@ -32,12 +32,14 @@ function check_basic_requirements() {
 
     # Check if python3 is installed
     if ! command -v python3 >/dev/null 2>&1; then
-        echo "Python3 is not installed. Please install it with sudo $PACKAGE_MANAGER install python3 python3-pip python3-venv"
+        echo "Python3 is not installed. Please install it with sudo $PACKAGE_MANAGER install python3 python3-venv"
         exit 1
-    elif ! command -v pip3 >/dev/null 2>&1 ; then
-        echo "pip3 is not installed. Please install it with sudo $PACKAGE_MANAGER install python3-pip"
+    elif ! python3 -c "import sys; sys.exit(sys.version_info < (3, 9))" >/dev/null 2>&1; then
+        echo "Python $(python3 -c 'import platform; print(platform.python_version())') is too old; skywalker needs Python 3.9 or newer."
         exit 1
     else
+        # No system pip3 is needed: the venv created below brings its own
+        # pip through ensurepip, which is what this checks for.
         # Debian/Ubuntu split venv's ensurepip into python3-venv; elsewhere
         # it ships with Python. Test the capability, not a package name.
         if ! python3 -c "import venv, ensurepip" >/dev/null 2>&1; then

@@ -75,7 +75,7 @@ To use the interactive web UI (``--web``, see below), install the ``web`` extra 
 
 Alternatively, the ``install.sh`` helper script can create a virtual environment and install the package into it for you, including the ``web`` extra.
 
-To check for basic system requirements (Python 3, pip, venv, git), run:
+To check for basic system requirements (Python 3.9+, venv, git), run:
 
 ``bash install.sh --check``
 
