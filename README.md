@@ -165,9 +165,10 @@ interactive window, including on the skychart panel.
 ``skywalker -f examples/example_file.csv --sitefile examples/sitefilename_example.csv -ns 2019-08-23 --skychart --savehtml``
 
 By default the HTML file embeds ``plotly.js`` so it opens with no internet connection,
-which is the point at an observatory. Use ``--htmlname`` to choose the output file (default
-is ``skywalker_<nightstarts>.html``), and ``--htmljs cdn`` for a much smaller file that
-loads ``plotly.js`` from a CDN instead (needs internet to view).
+which is the point at an observatory. Use ``--htmlname`` to choose the output file (by
+default it follows ``--figname``, so ``--figname test04`` writes ``test04.html`` next to
+``test04.png``; without either it is ``skywalker_<nightstarts>.html``), and ``--htmljs cdn``
+for a much smaller file that loads ``plotly.js`` from a CDN instead (needs internet to view).
 
 Interactive web UI
 -------------------

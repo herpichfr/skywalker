@@ -102,7 +102,8 @@ def parse_args(argv=None):
                         with hover enabled. Requires plotly. Default is False.")
     parser.add_argument("--htmlname", "-hn", type=str, required=False,
                         help="Name of the HTML file to save. \
-                        Default is skywalker_<nightstarts>.html.")
+                        Default follows --figname (with .html), or \
+                        skywalker_<nightstarts>.html without it.")
     parser.add_argument("--htmljs", type=str, default="embed",
                         choices=["embed", "cdn", "directory"],
                         help="How to include plotly.js: embed (self-contained, \
@@ -1134,9 +1135,22 @@ class Skywalker:
             f"Hover cursor enabled for {len(self.tracks)} track(s).")
 
     def _html_filename(self):
-        """Name of the HTML file to save, mirroring the --figname convention."""
+        """Name of the HTML file to save.
+
+        --htmlname wins when given. Otherwise the HTML follows --figname,
+        so --savefig --savehtml --figname test04 writes test04.png and
+        test04.html side by side; an image extension on --figname
+        (plan.png) is swapped for .html, but any other dot in the name
+        (run_2019.08.23) is kept. With neither, the default is
+        skywalker_<nightstarts>.html, matching the PNG default.
+        """
         if self.htmlname:
             name = self.htmlname
+        elif self.figname:
+            from matplotlib.backend_bases import FigureCanvasBase
+            _stem, _ext = os.path.splitext(self.figname)
+            _image_exts = FigureCanvasBase.get_supported_filetypes()
+            name = _stem if _ext[1:].lower() in _image_exts else self.figname
         else:
             name = f"skywalker_{self.nightstarts}.html"
         if not name.lower().endswith(('.html', '.htm')):
