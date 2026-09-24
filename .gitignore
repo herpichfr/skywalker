@@ -8,6 +8,7 @@ __pycache__/
 *.egg-info/
 *.egg
 *.log
+build/
 
 # Local session notes, not part of the project
 HANDOFF.md
